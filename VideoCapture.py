@@ -1,62 +1,46 @@
 import cv2
-import datetime
+from datetime import datetime
+
+# /dev/video0を指定
+DEV_ID = 0
 
 # params
 Width = 640  # 幅
 Height = 480  # 高さ
 FPS = 10  # フレームレート (frames/sec)
-VideoDuration = 1 # ビデオの長さ　(分)
+VideoDuration = 0.5 # ビデオの長さ　(分)
 
-today = datetime.date.today()
 # USBを接続したら、パス名を調べて (右クリックでコピー) 下の""内にペースト
 USBpath = ""
-data_dir_path = USBpath + "/Video{}/".format(today)
 
-# VideoCaptureオブジェクト取得
-cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+def main():
+    # /dev/video0を指定
+    cap = cv2.VideoCapture(DEV_ID)
 
-# キャプチャパラメータ設定
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, Width)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, Height)
-cap.set(cv2.CAP_PROP_FPS, FPS)
+    # パラメータの指定
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, Width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, Height)
+    cap.set(cv2.CAP_PROP_FPS, FPS)
 
-# ファイル名生成
-date = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-path = data_dir_path + "./" + date + ".mp4"
+    # ファイル名に日付を指定
+    date = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = USBpath + "/" + date + ".mp4"
 
-# 出力ファイル設定
-fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
-out = cv2.VideoWriter(path, fourcc, FPS, (Width, Height))
+    # 動画パラメータの指定
+    fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
+    out = cv2.VideoWriter(path, fourcc, FPS, (Width, Height))
 
-base_timing = datetime.datetime.now()
+    # キャプチャ
+    for _ in range(FPS * VideoDuration*60):
+        ret, frame = cap.read()
+        out.write(frame)
 
-# キャプチャ実行
-while (True):
-    # フレームを取得
-    ret, frame = cap.read()
-
-    # 読み込めない場合エラー処理
-    if not ret:
-        print("not capture")
-        break
-
-    # フレームを出力
-    out.write(frame)
-
-    # 画像表示
-    cv2.imshow("Frame", frame)
-
-    # 時間を超えたら終了
-    current_timing = datetime.datetime.now()
-    elapsed_sec = (current_timing - base_timing).total_seconds()
-    if elapsed_sec > VideoDuration*60:
-        break
+    # 後片付け
+    cap.release()
+    out.release()
+    cv2.destroyAllWindows()
+    return
 
 
-
-# カメラデバイスクローズ
-cap.release()
-out.release()
-
-# ウィンドウクローズ
-cv2.destroyAllWindows()
+if __name__ == "__main__":
+    main()
