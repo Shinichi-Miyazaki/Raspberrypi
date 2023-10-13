@@ -16,7 +16,7 @@ num_of_images = 4 #イメージの枚数
 today = datetime.date.today()
 
 # USBを接続したら、パス名を調べて (右クリックでコピー) 下の""内にペースト
-USBpath = "/media/shinichimiyazaki/6312-ED24"
+USBpath = ""
 data_dir_path = USBpath + "/TimeLapse{}/".format(today)
 
 # data container

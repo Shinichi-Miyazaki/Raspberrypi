@@ -9,7 +9,7 @@ VideoDuration = 1 # ビデオの長さ　(分)
 
 today = datetime.date.today()
 # USBを接続したら、パス名を調べて (右クリックでコピー) 下の""内にペースト
-USBpath = "/media/shinichimiyazaki/6312-ED24"
+USBpath = ""
 data_dir_path = USBpath + "/Video{}/".format(today)
 
 # VideoCaptureオブジェクト取得
@@ -21,7 +21,7 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, Height)
 cap.set(cv2.CAP_PROP_FPS, FPS)
 
 # ファイル名生成
-date = datetime.now().strftime("%Y%m%d_%H%M%S")
+date = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 path = data_dir_path + "./" + date + ".mp4"
 
 # 出力ファイル設定
