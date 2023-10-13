@@ -1,3 +1,4 @@
+import os
 import cv2
 from datetime import datetime
 
@@ -22,16 +23,19 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, Height)
     cap.set(cv2.CAP_PROP_FPS, FPS)
 
+    # 記録フォルダの作成
+    os.makedirs(USBpath + "/Videos", exist_ok=True)
+
     # ファイル名に日付を指定
     date = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = USBpath + "/" + date + ".mp4"
+    path = USBpath + "/Videos" + date + ".mp4"
 
     # 動画パラメータの指定
     fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
     out = cv2.VideoWriter(path, fourcc, FPS, (Width, Height))
 
     # キャプチャ
-    for _ in range(FPS * VideoDuration*60):
+    for _ in range(FPS * int(VideoDuration*60)):
         ret, frame = cap.read()
         out.write(frame)
 
