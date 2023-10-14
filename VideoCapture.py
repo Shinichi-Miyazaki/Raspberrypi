@@ -38,6 +38,8 @@ def main():
     for _ in range(FPS * int(VideoDuration*60)):
         ret, frame = cap.read()
         out.write(frame)
+        # 画像表示
+        cv2.imshow("Frame", frame)
 
     # 後片付け
     cap.release()

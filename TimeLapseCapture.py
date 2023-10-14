@@ -24,7 +24,7 @@ timelog = []
 
 def take_image_periodically(num):
     global timelog
-    filename = "{0:04d}".format(num) + ".jpg"
+    filename = "{0:05d}".format(num) + ".jpg"
 
     camera.capture(data_dir_path + filename)
     now = datetime.datetime.now()
