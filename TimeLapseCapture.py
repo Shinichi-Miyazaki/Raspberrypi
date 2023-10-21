@@ -1,4 +1,4 @@
-"""
+"""TimeLapseCapture.py
 Author: Shinichi Miyazaki
 
 """
@@ -10,7 +10,7 @@ import threading
 import numpy as np
 import pandas as pd
 
-# params
+### params ###
 interval = 2 #タイムラプスのインターバル (秒)
 num_of_images = 4 #イメージの枚数
 today = datetime.date.today()
