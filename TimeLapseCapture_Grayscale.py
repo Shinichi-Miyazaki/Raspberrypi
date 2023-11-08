@@ -3,16 +3,19 @@ Author: Shinichi Miyazaki
 
 """
 import datetime
-import picamera
+from picamera2 import Picamera2
 import os
 import time
 import threading
 import numpy as np
 import pandas as pd
+from PIL import Image
 
 ### params ###
 interval = 2 #タイムラプスのインターバル (秒)
 num_of_images = 4 #イメージの枚数
+width = 1280
+height = 800
 today = datetime.date.today()
 
 # USBを接続したら、パス名を調べて (右クリックでコピー) 下の""内にペースト
@@ -26,7 +29,11 @@ def take_image_periodically(num):
     global timelog
     filename = "{0:05d}".format(num) + ".jpg"
 
-    camera.capture(data_dir_path + filename)
+    camera.start()
+    yuv = camera.capture_array()
+    grey = yuv[:height, :width]
+    grey_img = Image.fromarray(grey)
+    grey_img.save(data_dir_path + filename)
 
     now = datetime.datetime.now()
     timelog.append(now.strftime('%H:%M:%S.%f'))
@@ -56,7 +63,10 @@ def schedule(interval_sec,
 def main():
     global timelog
     global camera
-    camera = picamera.PiCamera()
+    camera = Picamera2()
+    config = camera.create_preview_configuration({'format': 'YUV420', 'size': (width, height)})
+    camera.configure(config)
+
 
     os.makedirs(data_dir_path, exist_ok = True)
 
