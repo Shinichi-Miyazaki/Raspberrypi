@@ -16,7 +16,7 @@ num_of_images = 4 #イメージの枚数
 today = datetime.date.today()
 
 # USBを接続したら、パス名を調べて (右クリックでコピー) 下の""内にペースト
-USBpath = ""
+USBpath = "/home/shi/Desktop/test"
 data_dir_path = USBpath + "/TimeLapse{}/".format(today)
 
 # data container
@@ -27,7 +27,7 @@ def take_image_periodically(num):
     filename = "{0:05d}".format(num) + ".jpg"
 
     camera.switch_mode_and_capture_file(capture_config,
-                                        camera.capture(data_dir_path + filename))
+                                        data_dir_path + filename)
     now = datetime.datetime.now()
     timelog.append(now.strftime('%H:%M:%S.%f'))
 

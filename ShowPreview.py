@@ -6,7 +6,7 @@ Durationという変数に希望の時間を秒単位で記載することで、
 実行前に、paramsの部分を任意の数値に書き換えてから実行してください。
 """
 
-import picamera
+from picamera2 import Picamera2
 import os
 import time
 
@@ -14,7 +14,7 @@ import time
 Duration = 10 #(sec)
 Resolution = (720, 480) #(x, y)
 def main(Duration):
-    camera=picamera.PiCamera()
+    camera=Picamera2()
     camera.start_preview()
     camera.resolution = Resolution
     camera.framerate=10

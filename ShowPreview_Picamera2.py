@@ -11,14 +11,15 @@ import time
 
 ### params ###
 Duration = 10 #(sec)
-Resolution = (720, 480) #(x, y)
+Resolution = (640, 480) #(x, y)
 def main(Duration):
     camera = Picamera2()
     camera_config = camera.create_preview_configuration()
     camera.configure(camera_config)
-    picam2.start_preview(Preview.QTGL,
+    camera.start_preview(Preview.QTGL,
                          width = Resolution[0],
                          height = Resolution[1])
+    camera.start()
     time.sleep(Duration)
     camera.stop_preview()
 
