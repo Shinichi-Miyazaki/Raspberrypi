@@ -14,12 +14,11 @@ from picamera2 import Picamera2
 # パラメータ
 interval = 2  # タイムラプスのインターバル (秒)
 num_of_images = 4  # イメージの枚数
-today = datetime.date.today()
 experiment_name = "" # 実験名を短い英数字で""の間に記載
 
 # USBを接続したら、パス名を調べて (右クリックでコピー) 下の""内にペースト
-USBpath = "/home/shi/Desktop/test"
-data_dir_path = USBpath + "/{0}/".format(experiment_name)
+USBpath = ""
+data_dir_path = USBpath + f"/{experiment_name}/"
 
 # data container
 timelog = []
@@ -74,7 +73,6 @@ def main():
     timelog = pd.DataFrame(np.array(timelog),
                            columns=["timelog"])
     print(timelog)
-    timelog.to_csv(data_dir_path + "/timelog.csv")
 
 
 if __name__ == '__main__':

@@ -11,43 +11,52 @@ import pandas as pd
 import RPi.GPIO as GPIO
 from picamera2 import Picamera2
 
-# パラメータ
+# init
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(25, GPIO.OUT)
+
+# params
 interval = 2  # タイムラプスのインターバル (秒)
 num_of_images = 4  # イメージの枚数
 today = datetime.date.today()
-experiment_name = "" # 実験名を短い英数字で""の間に記載
 
 # USBを接続したら、パス名を調べて (右クリックでコピー) 下の""内にペースト
 USBpath = "/home/shi/Desktop/test"
-data_dir_path = USBpath + "/{0}/".format(experiment_name)
+data_dir_path = USBpath + "/TimeLapse{}/".format(today)
 
 # data container
 timelog = []
 
 
-def take_image_periodically(num):
-    global timelog
+def capture(num):
     filename = "{0:05d}".format(num) + ".jpg"
-
     camera.switch_mode_and_capture_file(capture_config,
                                         data_dir_path + filename)
     now = datetime.datetime.now()
     timelog.append(now.strftime('%H:%M:%S.%f'))
 
 
+def take_image_periodically(num):
+    global timelog
+    if num % 30 == 5:
+        capture(num)
+        GPIO.output(25, GPIO.HIGH)
+    elif num % 30 == 10:
+        capture(num)
+        GPIO.output(25, GPIO.LOW)
+    else:
+        capture(num)
+
+
 def schedule(interval_sec,
-             callable_task,
-             args=None,
-             kwargs=None):
-    args = args or []
-    kwargs = kwargs or {}
+             callable_task):
+    global image_i
     # 基準時刻を作る
     base_timing = datetime.datetime.now()
-    for i in range(num_of_images):
+    for image_i in range(num_of_images):
         # 処理を別スレッドで実行する
         t = threading.Thread(target=callable_task,
-                             args=(i,),
-                             kwargs=kwargs)
+                             args=(image_i,))
         t.start()
 
         # 基準時刻と現在時刻の剰余を元に、次の実行までの時間を計算する
