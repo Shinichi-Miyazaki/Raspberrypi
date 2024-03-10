@@ -27,8 +27,7 @@ output = FfmpegOutput(data_path)
 def main():
     picam2 = Picamera2()
     # configure camera
-    video_config = picam2.create_video_configuration()
-    video_config.video_configuration.size = Video_size
+    video_config = picam2.create_video_configuration(main={"size": Video_size})
     video_config.video_configuration.controls.FrameRate = Framerate
     video_config.video_configuration.controls.LensPosition = LensPosition
     picam2.configure(video_config)

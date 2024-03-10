@@ -74,7 +74,7 @@ def main():
     time.sleep(Latency_to_shoot)
 
     picam2 = Picamera2()
-    video_config = picam2.create_video_configuration()
+    video_config = picam2.create_video_configuration(main={"size": Video_size})
     video_config.video_configuration.size = Video_size
     video_config.video_configuration.controls.FrameRate = Framerate
     video_config.video_configuration.controls.LensPosition = LensPosition
