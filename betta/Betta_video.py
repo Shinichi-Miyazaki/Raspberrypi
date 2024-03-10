@@ -5,10 +5,12 @@ Date: 20230308
 
 import time
 from picamera2 import Picamera2
+from picamera2.encoders import H264Encoder
+from picamera2.outputs import FfmpegOutput
 
 # 実験のたびに変更するパラメータ
 experiment_name = "" # 実験名を短い英数字で""の間に記載、ファイル名になる。
-USBpath = ""　# USBを接続したら、パス名を調べて (右クリックでコピー) ""内にペースト
+USBpath = "" # USBを接続したら、パス名を調べて (右クリックでコピー) ""内にペースト
 
 # 以下は適宜変更
 Latency_to_shoot = 12600  # プログラム実行から動画撮影開始までの時間 (sec)
@@ -20,13 +22,22 @@ LensPosition = 1.5  # レンズの位置
 # 以下は変更しない
 Video_duration_sec = Video_duration * 3600  # 動画の時間 (sec)
 data_path = USBpath + f"/{experiment_name}.mp4"  # 動画の保存先
+encoder = H264Encoder(10000000)
+output = FfmpegOutput(data_path)
 def main():
     picam2 = Picamera2()
-    picam2.video_configuration.size = Video_size
-    picam2.video_configuration.controls.FrameRate = Framerate
-    picam2.video_configuration.controls.LensPosition = LensPosition
+    # configure camera
+    video_config = picam2.create_video_configuration()
+    video_config.video_configuration.size = Video_size
+    video_config.video_configuration.controls.FrameRate = Framerate
+    video_config.video_configuration.controls.LensPosition = LensPosition
+    picam2.configure(video_config)
+
+    # shoot video
     time.sleep(Latency_to_shoot)
-    picam2.start_and_record_video(data_path, duration=Video_duration_sec)
+    picam2.start_recording(encoder, output)
+    time.sleep(Video_duration_sec)
+    picam2.stop_recording()
 
 if __name__ == '__main__':
     main()
