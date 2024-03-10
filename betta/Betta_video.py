@@ -19,8 +19,7 @@ LensPosition = 1.5  # レンズの位置
 
 # 以下は変更しない
 Video_duration_sec = Video_duration * 3600  # 動画の時間 (sec)
-data_path = USBpath + f"/{experiment_name}.mp4"
-
+data_path = USBpath + f"/{experiment_name}.mp4"  # 動画の保存先
 def main():
     picam2 = Picamera2()
     picam2.video_configuration.size = Video_size
