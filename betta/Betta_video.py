@@ -1,6 +1,12 @@
 """Betta_video.py
 Author: Shinichi Miyazaki
 Date: 20230308
+
+使い方
+1. 実験名をexperiment_nameに記載する。
+2. USBを接続したら、パス名を調べて (右クリックでコピー) USBpathにペーストする。
+3. 各種パラメータ (Latency_to_shoot, Video_duration, Video_size, Framerate) を適宜変更する。
+4. プログラムを実行する。
 """
 
 import time
@@ -18,7 +24,6 @@ Latency_to_shoot = 10  # プログラム実行から動画撮影開始までの�
 Video_duration = 1  # 動画の時間 (hour)
 Video_size = (640, 480) # 動画のサイズ (width, height)
 Framerate = 4  # 動画のフレームレート (frames/sec)
-LensPosition = 1.5  # レンズの位置
 
 # 以下は変更しない
 Video_duration_sec = Video_duration * 3600  # 動画の時間 (sec)

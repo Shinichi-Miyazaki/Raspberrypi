@@ -2,7 +2,17 @@
 Author: Shinichi Miyazaki
 Date 20230308
 
+使い方
+1. 実験名をexperiment_nameに記載する。
+2. USBを接続したら、パス名を調べて (右クリックでコピー) USBpathにペーストする。
+3. 各種パラメータ (Latency_to_shoot, Total_video_duration, Single_video_duration, Video_size, Framerate) を適宜変更する。
+4. プログラムを実行する。
+
+ありがちなエラー
+1. total_video_durationを短くしていって、Single_video_durationより短くなるとエラーが起こる。
 """
+
+
 import os
 import datetime
 import time
@@ -18,19 +28,18 @@ USBpath = "/media/hayashilab/5F89-3C97" # USBを接続したら、パス名を�
 
 # 以下は適宜変更
 Latency_to_shoot = 0  # プログラム実行から動画撮影開始までの時間 (sec)
-Video_duration = 0.1  # 動画の時間 (hour)
+Total_video_duration = 0.1  # 動画の時間 (hour)
+Single_video_duration = 1  # 単体の動画の時間 (min)
 Video_size = (640, 480) # 動画のサイズ (width, height)
 Framerate = 4  # 動画のフレームレート (frames/sec)
-LensPosition = 1.5  # レンズの位置
 
 # 以下は変更しない
-Total_video_duration_sec = Video_duration * 3600  # 動画の時間 (sec)
-Single_video_duration = 1 # (min)
+Total_video_duration_sec = Total_video_duration * 3600  # 動画の時間 (sec)
 Single_video_duration_sec = Single_video_duration * 60  # 単体の動画の時間 (sec)
 Num_of_videos = int(Total_video_duration_sec / Single_video_duration_sec)
 data_dir_path = USBpath + f"/{experiment_name}/"
 encoder = H264Encoder(10000000)
-output = FfmpegOutput(data_path)
+output = FfmpegOutput(data_dir_path)
 
 # time log container
 timelog = []

@@ -3,6 +3,13 @@
   <component name="JupyterPersistentConnectionParameters">
     <option name="moduleParameters">
       <map>
+        <entry key="$PROJECT_DIR$/../OxandNtsinCSF/.idea/Ox_and_Nts.iml">
+          <value>
+            <JupyterConnectionParameters>
+              <option name="managed" value="true" />
+            </JupyterConnectionParameters>
+          </value>
+        </entry>
         <entry key="$USER_HOME$/Github/image_analysis/.idea/image_analysis.iml">
           <value>
             <JupyterConnectionParameters>
@@ -16,13 +23,6 @@
             <JupyterConnectionParameters>
               <option name="managed" value="true" />
               <option name="port" value="8888" />
-            </JupyterConnectionParameters>
-          </value>
-        </entry>
-        <entry key="$PROJECT_DIR$/../OxandNtsinCSF/.idea/Ox_and_Nts.iml">
-          <value>
-            <JupyterConnectionParameters>
-              <option name="managed" value="true" />
             </JupyterConnectionParameters>
           </value>
         </entry>
