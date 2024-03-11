@@ -6,8 +6,6 @@ import os
 import datetime
 import time
 import threading
-import numpy as np
-import pandas as pd
 import RPi.GPIO as GPIO
 from picamera2 import Picamera2
 from libcamera import Transform
@@ -84,8 +82,9 @@ def main():
 
     schedule(interval_sec=interval,
              callable_task=take_image_periodically)
-    timelog = pd.DataFrame(np.array(timelog),
-                           columns=["timelog"])
+    with open("timelog.txt", "w") as f:
+        for i in timelog:
+            f.write(i + "\n")
     print(timelog)
     timelog.to_csv(data_dir_path + "/timelog.csv")
 

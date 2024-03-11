@@ -6,8 +6,6 @@ import os
 import datetime
 import time
 import threading
-import numpy as np
-import pandas as pd
 from picamera2 import Picamera2
 from libcamera import Transform
 
@@ -71,8 +69,10 @@ def main():
     os.makedirs(data_dir_path, exist_ok=True)
     schedule(interval_sec=interval,
              callable_task=take_image_periodically)
-    timelog = pd.DataFrame(np.array(timelog),
-                           columns=["timelog"])
+    with open("timelog.txt", "w") as f:
+        for i in timelog:
+            f.write(i + "\n")
+
     print(timelog)
 
 
