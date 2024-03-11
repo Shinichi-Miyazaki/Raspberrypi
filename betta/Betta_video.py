@@ -7,14 +7,15 @@ import time
 from picamera2 import Picamera2
 from picamera2.encoders import H264Encoder
 from picamera2.outputs import FfmpegOutput
+from libcamera import Transform
 
 # 実験のたびに変更するパラメータ
-experiment_name = "" # 実験名を短い英数字で""の間に記載、ファイル名になる。
-USBpath = "" # USBを接続したら、パス名を調べて (右クリックでコピー) ""内にペースト
+experiment_name = "test" # 実験名を短い英数字で""の間に記載、ファイル名になる。
+USBpath = "/home/shi/Desktop" # USBを接続したら、パス名を調べて (右クリックでコピー) ""内にペースト
 
 # 以下は適宜変更
-Latency_to_shoot = 12600  # プログラム実行から動画撮影開始までの時間 (sec)
-Video_duration = 36  # 動画の時間 (hour)
+Latency_to_shoot = 10  # プログラム実行から動画撮影開始までの時間 (sec)
+Video_duration = 1  # 動画の時間 (hour)
 Video_size = (640, 480) # 動画のサイズ (width, height)
 Framerate = 4  # 動画のフレームレート (frames/sec)
 LensPosition = 1.5  # レンズの位置
@@ -27,9 +28,10 @@ output = FfmpegOutput(data_path)
 def main():
     picam2 = Picamera2()
     # configure camera
-    video_config = picam2.create_video_configuration(main={"size": Video_size})
-    video_config.video_configuration.controls.FrameRate = Framerate
-    video_config.video_configuration.controls.LensPosition = LensPosition
+    video_config = picam2.create_video_configuration(main={"size": Video_size},
+                                                     transform=Transform(hflip=True,
+                                                                         vflip=True))
+    picam2.video_configuration.controls.FrameRate = Framerate
     picam2.configure(video_config)
 
     # shoot video

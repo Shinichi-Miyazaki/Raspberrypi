@@ -8,6 +8,9 @@ import datetime
 import time
 import threading
 from picamera2 import Picamera2
+from picamera2.encoders import H264Encoder
+from picamera2.outputs import FfmpegOutput
+from libcamera import Transform
 
 # 実験のたびに変更するパラメータ
 experiment_name = "test3" # 実験名を短い英数字で""の間に記載、ファイル名になる。
@@ -74,10 +77,10 @@ def main():
     time.sleep(Latency_to_shoot)
 
     picam2 = Picamera2()
-    video_config = picam2.create_video_configuration(main={"size": Video_size})
-    video_config.video_configuration.size = Video_size
-    video_config.video_configuration.controls.FrameRate = Framerate
-    video_config.video_configuration.controls.LensPosition = LensPosition
+    video_config = picam2.create_video_configuration(main={"size": Video_size},
+                                                     transform=Transform(hflip=True,
+                                                                         vflip=True))
+    picam2.video_configuration.controls.FrameRate = Framerate
     picam2.configure(video_config)
     schedule(interval_sec=Single_video_duration_sec,
              callable_task=take_video_periodically)
