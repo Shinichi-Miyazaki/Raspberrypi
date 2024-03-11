@@ -6,18 +6,18 @@ Durationという変数に希望の時間を秒単位で記載することで、
 実行前に、paramsの部分を任意の数値に書き換えてから実行してください。
 """
 
-from picamera2 import Picamera2, Preview
+from picamera2 import Picamera2
+import os
 import time
 
 ### params ###
-Duration = 10 #(sec)表示時間
-#Resolution = (640, 480) #(x, y)解像度
+Duration = 10 #(sec)
+Resolution = (720, 480) #(x, y)
 def main(Duration):
-    camera = Picamera2()
-    camera_config = camera.create_preview_configuration()
-    camera.configure(camera_config)
-    camera.start_preview(Preview.QTGL)#,width = Resolution[0],height = Resolution[1])
-    camera.start()
+    camera=Picamera2()
+    camera.start_preview()
+    camera.resolution = Resolution
+    camera.framerate=10
     time.sleep(Duration)
     camera.stop_preview()
 

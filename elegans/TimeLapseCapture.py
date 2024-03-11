@@ -8,12 +8,13 @@ import time
 import threading
 import numpy as np
 import pandas as pd
-import RPi.GPIO as GPIO
 from picamera2 import Picamera2
+from libcamera import Transform
 
 # パラメータ
 interval = 2  # タイムラプスのインターバル (秒)
 num_of_images = 4  # イメージの枚数
+Video_size = (640, 480) # 動画のサイズ (width, height)
 experiment_name = "" # 実験名を短い英数字で""の間に記載
 
 # USBを接続したら、パス名を調べて (右クリックでコピー) 下の""内にペースト
@@ -63,11 +64,11 @@ def main():
     global capture_config
 
     camera = Picamera2()
-    capture_config = camera.create_still_configuration()
+    capture_config = camera.create_still_configuration(main={"size": Video_size},
+                                                       transform=Transform(hflip=True,
+                                                                           vflip=True))
     camera.start(show_preview=True)
-
     os.makedirs(data_dir_path, exist_ok=True)
-
     schedule(interval_sec=interval,
              callable_task=take_image_periodically)
     timelog = pd.DataFrame(np.array(timelog),
