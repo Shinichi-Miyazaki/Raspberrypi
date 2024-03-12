@@ -22,7 +22,7 @@ USBpath = "/home/shi/Desktop" # USBを接続したら、パス名を調べて (�
 
 # 以下は適宜変更
 Latency_to_shoot = 10  # プログラム実行から動画撮影開始までの時間 (sec)
-Video_duration = 1  # 動画の時間 (hour)
+Video_duration = 0.01  # 動画の時間 (hour)
 Video_size = (640, 480) # 動画のサイズ (width, height)
 Framerate = 4  # 動画のフレームレート (frames/sec)
 

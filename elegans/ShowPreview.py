@@ -11,11 +11,13 @@ import time
 from libcamera import Transform
 
 ### params ###
-Duration = 10 #(sec)表示時間
-#Resolution = (640, 480) #(x, y)解像度
+Duration = 100 #(sec)表示時間
+Resolution = (1280, 960) #(x, y)解像度
+
 def main(Duration):
     camera = Picamera2()
-    camera_config = camera.create_preview_configuration(transform = Transform(hflip=True, vflip=True))
+    camera_config = camera.create_preview_configuration(main={"size": Resolution},
+                                                        transform = Transform(hflip=True, vflip=True))
     camera.configure(camera_config)
     camera.start_preview(Preview.QTGL)#,width = Resolution[0],height = Resolution[1])
     camera.start()

@@ -11,12 +11,12 @@ from libcamera import Transform
 
 # パラメータ
 interval = 2  # タイムラプスのインターバル (秒)
-num_of_images = 4  # イメージの枚数
-Video_size = (640, 480) # 動画のサイズ (width, height)
-experiment_name = "" # 実験名を短い英数字で""の間に記載
+num_of_images = 18000  # イメージの枚数
+Video_size = (1280, 960) # 動画のサイズ (width, height)
+experiment_name = "20240311_Lego1_N2_without" # 実験名を短い英数字で""の間に記載
 
 # USBを接続したら、パス名を調べて (右クリックでコピー) 下の""内にペースト
-USBpath = ""
+USBpath = "/media/shi/2EEF-F720"
 data_dir_path = USBpath + f"/{experiment_name}/"
 
 # data container
@@ -67,6 +67,7 @@ def main():
                                                                            vflip=True))
     camera.start(show_preview=True)
     os.makedirs(data_dir_path, exist_ok=True)
+    os.chdir(data_dir_path)
     schedule(interval_sec=interval,
              callable_task=take_image_periodically)
     with open("timelog.txt", "w") as f:
