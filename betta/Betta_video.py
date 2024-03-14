@@ -7,7 +7,6 @@ Date: 20230308
 2. USBを接続したら、パス名を調べて (右クリックでコピー) USBpathにペーストする。
 3. 各種パラメータ (Latency_to_shoot, Video_duration, Video_size, Framerate) を適宜変更する。
 4. プログラムを実行する。
-
 """
 
 import time

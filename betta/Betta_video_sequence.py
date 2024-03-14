@@ -52,6 +52,7 @@ def take_video_periodically(num):
     time.sleep(Single_video_duration_sec)
     now = datetime.datetime.now()
     timelog.append(now.strftime('%H:%M:%S.%f'))
+    time.sleep(10)
 
 
 def schedule(interval_sec,
