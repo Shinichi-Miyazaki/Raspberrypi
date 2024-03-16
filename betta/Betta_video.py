@@ -16,8 +16,8 @@ from picamera2.outputs import FfmpegOutput
 from libcamera import Transform
 
 # 実験のたびに変更するパラメータ
-experiment_name = "test" # 実験名を短い英数字で""の間に記載、ファイル名になる。
-USBpath = "/home/shi/Desktop" # USBを接続したら、パス名を調べて (右クリックでコピー) ""内にペースト
+experiment_name = "" # 実験名を短い英数字で""の間に記載、ファイル名になる。
+USBpath = "" # USBを接続したら、パス名を調べて (右クリックでコピー) ""内にペースト
 
 # 以下は適宜変更
 Latency_to_shoot = 10  # プログラム実行から動画撮影開始までの時間 (sec)
