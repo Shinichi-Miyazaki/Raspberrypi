@@ -22,6 +22,7 @@ Framerate = 4  # 動画のフレームレート (frames/sec)
 Total_video_duration_sec = Total_video_duration * 3600  # 動画の時間 (sec)
 Single_video_duration_sec = Single_video_duration * 60  # 単体の動画の時間 (sec)
 Num_of_videos = int(Total_video_duration_sec / Single_video_duration_sec)
+Picamera2.set_logging(Picamera2.DEBUG)
 
 with Picamera2() as camera:
     os.chdir(USBpath)
