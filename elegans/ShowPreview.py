@@ -11,8 +11,8 @@ import time
 from libcamera import Transform
 
 ### params ###
-Duration = 100 #(sec)表示時間
-Resolution = (1280, 960) #(x, y)解像度
+Duration = 200 #(sec)表示時間
+Resolution = (1024, 768) #(x, y)解像度
 
 def main(Duration):
     camera = Picamera2()

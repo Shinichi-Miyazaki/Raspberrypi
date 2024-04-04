@@ -11,8 +11,13 @@ from libcamera import Transform
 
 # パラメータ
 imaging_fps = 1  # タイムラプスのインターバル (秒)
-num_of_images = 30  # イメージの枚数
-imaging_interval = 3 # イメージの撮影間隔 (時間)
+num_of_images = 30  # 各バーストごとのイメージの枚数
+burst_interval = 3 # イメージの撮影間隔 (時間)
+burst_interval_sec = burst_interval * 3600 # イメージの撮影間隔 (秒)
+
+Total_duration = 240 # イメージングのトータル時間 (時間)
+burst_num = int(Total_duration / burst_interval) # イメージの撮影回数
+
 Video_size = (1280, 960) # 動画のサイズ (width, height)
 experiment_name = "survival_test" # 実験名を短い英数字で""の間に記載
 
@@ -35,29 +40,6 @@ def take_image_periodically(num):
     timelog.append(now.strftime('%H:%M:%S.%f'))
 
 
-def schedule(interval_sec,
-             callable_task,
-             args=None,
-             kwargs=None):
-    args = args or []
-    kwargs = kwargs or {}
-    # 基準時刻を作る
-    base_timing = datetime.datetime.now()
-    for i in range(num_of_images):
-        # 処理を別スレッドで実行する
-        t = threading.Thread(target=callable_task,
-                             args=(i,),
-                             kwargs=kwargs)
-        t.start()
-
-        # 基準時刻と現在時刻の剰余を元に、次の実行までの時間を計算する
-        current_timing = datetime.datetime.now()
-        elapsed_sec = (current_timing - base_timing).total_seconds()
-        sleep_sec = interval_sec - (elapsed_sec % interval_sec)
-
-        time.sleep(max(sleep_sec, 0))
-
-
 def main():
     global timelog
     global camera
@@ -70,8 +52,10 @@ def main():
     camera.start(show_preview=True)
     os.makedirs(data_dir_path, exist_ok=True)
     os.chdir(data_dir_path)
-    schedule(interval_sec=imaging_fps,
-             callable_task=take_image_periodically)
+    for burst_idx in range(burst_num):
+        take_image_periodically(burst_idx)
+        time.sleep(burst_interval_sec - num_of_images * imaging_fps)
+
     with open("timelog.txt", "w") as f:
         for i in timelog:
             f.write(i + "\n")
