@@ -11,12 +11,12 @@ from libcamera import Transform
 
 # パラメータ
 interval = 2  # タイムラプスのインターバル (秒)
-num_of_images = 18000  # イメージの枚数
-Video_size = (1280, 960) # 動画のサイズ (width, height)
-experiment_name = "20240311_Lego1_N2_without" # 実験名を短い英数字で""の間に記載
+num_of_images = 3 # イメージの枚数
+Video_size = (1280, 1024) # 動画のサイズ (width, height)
+experiment_name = "test_lego1_1" # 実験名を短い英数字で""の間に記載
 
 # USBを接続したら、パス名を調べて (右クリックでコピー) 下の""内にペースト
-USBpath = "/media/shi/2EEF-F720"
+USBpath = "/media/shi/02FF-3ED4"
 data_dir_path = USBpath + f"/{experiment_name}/"
 
 # data container
@@ -63,6 +63,8 @@ def main():
 
     camera = Picamera2()
     capture_config = camera.create_still_configuration(main={"size": Video_size},
+                                                       controls = {"ExposureTime":50000,
+                                                                   "AnalogueGain":10.0},
                                                        transform=Transform(hflip=True,
                                                                            vflip=True))
     camera.start(show_preview=True)

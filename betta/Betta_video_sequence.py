@@ -23,15 +23,17 @@ from picamera2.outputs import FfmpegOutput
 from libcamera import Transform
 
 # 実験のたびに変更するパラメータ
-experiment_name = "test3" # 実験名を短い英数字で""の間に記載、ファイル名になる。
-USBpath = "/home/shi/Desktop/test" # USBを接続したら、パス名を調べて (右クリックでコピー) ""内にペースト
+experiment_name = "test2"
+# 実験名を短い英数字で""の間に記載、ファイル名になる。
+USBpath = "/media/si/2EEF-F720" # USBを接続したら、パス名を調べて (右クリックでコピー) ""内にペースト
 
 # 以下は適宜変更
 Latency_to_shoot = 0  # プログラム実行から動画撮影開始までの時間 (sec)
-Total_video_duration = 0.02 # 動画の時間 (hour)
-Single_video_duration = 0.1  # 単体の動画の時間 (min)
+Total_video_duration = 0.05 # 動画の時間 (hour)
+Single_video_duration = 1  # 単体の動画の時間 (min)
 Video_size = (640, 480) # 動画のサイズ (width, height)
 Framerate = 4  # 動画のフレームレート (frames/sec)
+Bitrate = 500000  # 動画のビットレート (bit/sec)
 
 # 以下は変更しない
 Total_video_duration_sec = Total_video_duration * 3600  # 動画の時間 (sec)
@@ -42,40 +44,22 @@ data_dir_path = USBpath + f"/{experiment_name}/"
 # time log container
 timelog = []
 
-def take_video_periodically(num):
+def take_video_periodically():
     global timelog
     
-    filename = "{0:05d}".format(num) + ".mp4"
-    encoder = H264Encoder(10000000)
-    output = FfmpegOutput(data_dir_path + filename)
-    picam2.start_recording(encoder, output)
-    time.sleep(Single_video_duration_sec)
-    now = datetime.datetime.now()
-    timelog.append(now.strftime('%H:%M:%S.%f'))
-    time.sleep(10)
-
-
-def schedule(interval_sec,
-             callable_task,
-             args=None,
-             kwargs=None):
-    args = args or []
-    kwargs = kwargs or {}
-    # 基準時刻を作る
-    base_timing = datetime.datetime.now()
-    for i in range(Num_of_videos):
-        # 処理を別スレッドで実行する
-        t = threading.Thread(target=callable_task,
-                             args=(i,),
-                             kwargs=kwargs)
-        t.start()
-
-        # 基準時刻と現在時刻の剰余を元に、次の実行までの時間を計算する
-        current_timing = datetime.datetime.now()
-        elapsed_sec = (current_timing - base_timing).total_seconds()
-        sleep_sec = interval_sec - (elapsed_sec % interval_sec)
-
-        time.sleep(max(sleep_sec, 0))
+    for num in range(Num_of_videos):
+        print(datetime.datetime.now())
+        filename = "{0:05d}".format(num) + ".mp4"
+        encoder = H264Encoder(Bitrate)
+        output = FfmpegOutput(data_dir_path + filename)
+        picam2.start_recording(encoder, output)
+        time.sleep(Single_video_duration_sec)
+        print(datetime.datetime.now())
+        picam2.stop_recording()
+        print(datetime.datetime.now())
+        now = datetime.datetime.now()
+        timelog.append(now.strftime('%H:%M:%S.%f'))
+    
 
 def main():
     global timelog
@@ -86,13 +70,11 @@ def main():
 
     time.sleep(Latency_to_shoot)
     picam2 = Picamera2()
-    video_config = picam2.create_video_configuration(main={"size": Video_size},
-                                                     transform=Transform(hflip=True,
-                                                                         vflip=True))
     picam2.video_configuration.controls.FrameRate = Framerate
-    picam2.configure(video_config)
-    schedule(interval_sec=Single_video_duration_sec,
-             callable_task=take_video_periodically)
+    picam2.video_configuration.size = Video_size
+    picam2.video_configuration.transform = Transform(hflip=True,vflip=True)
+    
+    take_video_periodically()
     with open("timelog.txt", "w") as f:
         for i in timelog:
             f.write(i + "\n")
