@@ -4,6 +4,7 @@ Author: Shinichi Miyazaki
 このプログラムはRaspberry piでカメラのプレビュー画像を表示します。
 Durationという変数に希望の時間を秒単位で記載することで、表示時間を決めることが可能です。
 実行前に、paramsの部分を任意の数値に書き換えてから実行してください。
+デフォルトの解像度は(1640, 1232)です。解像度を変更するとsensor modeが変更され、時に望んだ範囲が映らなくなるので注意。
 """
 
 from picamera2 import Picamera2, Preview
@@ -12,7 +13,7 @@ from libcamera import Transform
 
 ### params ###
 Duration = 200 #(sec)表示時間
-Resolution = (1640, 1232) #(x, y)解像度
+Resolution = (1640, 1232) #(x, y) default = (1640, 1232)
 
 def main(Duration):
     camera = Picamera2()
