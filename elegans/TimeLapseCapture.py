@@ -12,7 +12,7 @@ from libcamera import Transform
 # パラメータ
 interval = 2  # タイムラプスのインターバル (秒)
 num_of_images = 3 # イメージの枚数
-Video_size = (1280, 1024) # 動画のサイズ (width, height)
+Video_size = (1640, 1232) # 動画のサイズ (width, height)
 experiment_name = "test_lego1_1" # 実験名を短い英数字で""の間に記載
 
 # USBを接続したら、パス名を調べて (右クリックでコピー) 下の""内にペースト
