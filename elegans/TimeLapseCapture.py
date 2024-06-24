@@ -75,6 +75,7 @@ def main():
     with open("timelog.txt", "w") as f:
         for i in timelog:
             f.write(i + "\n")
+    camera.stop_preview()
 
     print(timelog)
 
