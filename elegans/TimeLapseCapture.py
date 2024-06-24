@@ -1,6 +1,7 @@
 """TimeLapseCapture.py
 Author: Shinichi Miyazaki
 
+デフォルトの解像度は(1640, 1232)です。解像度を変更するとsensor modeが変更され、時に望んだ範囲が映らなくなるので注意。
 """
 import os
 import datetime
@@ -12,7 +13,7 @@ from libcamera import Transform
 # パラメータ
 interval = 2  # タイムラプスのインターバル (秒)
 num_of_images = 3 # イメージの枚数
-Video_size = (1280, 1024) # 動画のサイズ (width, height)
+image_size = (1640, 1232) # 画像のサイズ (width, height)　default = (1640, 1232)
 experiment_name = "test_lego1_1" # 実験名を短い英数字で""の間に記載
 
 # USBを接続したら、パス名を調べて (右クリックでコピー) 下の""内にペースト
@@ -62,7 +63,7 @@ def main():
     global capture_config
 
     camera = Picamera2()
-    capture_config = camera.create_still_configuration(main={"size": Video_size},
+    capture_config = camera.create_still_configuration(main={"size": image_size},
                                                        controls = {"ExposureTime":50000,
                                                                    "AnalogueGain":10.0},
                                                        transform=Transform(hflip=True,
