@@ -7,7 +7,6 @@ An in-depth paragraph about your project and overview of use.
 
 ## Getting Started
 ### Dependencies
-
 Scripts work on following environments.  
 - Raspberry pi 4B (2, 4, 8gb RAM)
 - Raspberry pi zero WH (preview does not work)
