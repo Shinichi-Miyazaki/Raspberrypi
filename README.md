@@ -3,14 +3,19 @@
 These scripts are used for the imaging system using Raspberry pi camera.  
 
 ## Description
-An in-depth paragraph about your project and overview of use.
+![An in-depth paragraph about your project and overview of use.](imgs/Raspi.png)  
+
+Result
+![RaspiResult](imgs/RaspiResult.png)
 
 ## Getting Started
 ### Dependencies
-
 Scripts work on following environments.  
 - Raspberry pi 4B (2, 4, 8gb RAM)
 - Raspberry pi zero WH (preview does not work)
+
+### Develop Raspberry pi system
+Please refer [MakeLegoSystem.md](elegans/MakeLegoSystem.md)
 
 ### Installing
 Currently, there is no installation.  
