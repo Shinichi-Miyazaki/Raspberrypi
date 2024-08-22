@@ -61,4 +61,18 @@ sudo apt-get install git
 ```bash
 cd /home/pi/Desktop/Scripts (or the path you copied)
 git clone https://github.com/Shinichi-Miyazaki/Raspberrypi.git
-```
+```  
+
+## Step 6: Change screen setting  
+For long term imaging, the screen sleep setting should be turn off. 
+1. open nano editor   
+```bash 
+sudo nano /etc/xdg/lxsession/LXDE/autostart
+```  
+2. add followings   
+``` bash 
+@xset s off 
+@xset s noblank
+@xset -dpms
+```  
+
