@@ -64,8 +64,8 @@ def main():
 
     camera = Picamera2()
     capture_config = camera.create_still_configuration(main={"size": image_size},
-                                                       controls = {"ExposureTime":50000,
-                                                                   "AnalogueGain":10.0},
+                                                       controls = {"ExposureTime":20000,
+                                                                   "AnalogueGain":3.0},
                                                        transform=Transform(hflip=True,
                                                                            vflip=True))
     camera.start(show_preview=True)
