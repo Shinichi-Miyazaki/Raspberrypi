@@ -25,9 +25,14 @@ HUMIDITY_MIN = 30
 client = WebClient(token=SLACK_TOKEN)
 
 def read_sensor():
-    humidity, temperature = Adafruit_DHT.read_retry(SENSOR, PIN)
-    return humidity, temperature
-
+    try:
+        humidity, temperature = Adafruit_DHT.read_retry(SENSOR, PIN)
+        if humidity is None or temperature is None:
+            raise ValueError("センサーから値が取得できませんでした")
+        return humidity, temperature
+    except Exception as e:
+        send_slack_message(f"センサー読み取りエラー: {str(e)}")
+        return None, None
 def save_to_csv(humidity, temperature):
     timestamp = datetime.datetime.now()
     with open(CSV_FILE, 'a', newline='') as f:
@@ -52,14 +57,7 @@ def send_slack_message(message):
     except SlackApiError as e:
         print(f"Error sending message: {e.response['error']}")
 
-def create_graph(file_name, start_time=None, end_time=None):
-    """CSVのログからグラフを生成し、画像ファイルを返す。
-
-    Args:
-        file_name (str): 保存先の画像ファイル名
-        start_time (datetime): この時刻以降のデータを使用（指定しない場合は全期間）
-        end_time (datetime): この時刻までのデータを使用（指定しない場合は全期間）
-    """
+def create_advanced_graph(file_name, start_time=None, end_time=None):
     df = pd.read_csv(CSV_FILE, names=['timestamp', 'temperature', 'humidity'], skiprows=1)
     df['timestamp'] = pd.to_datetime(df['timestamp'])
 
@@ -72,15 +70,23 @@ def create_graph(file_name, start_time=None, end_time=None):
     if df.empty:
         return None
 
-    plt.figure(figsize=(12, 6))
-    plt.plot(df['timestamp'], df['temperature'], label='Temperature (°C)', color='r')
-    plt.plot(df['timestamp'], df['humidity'], label='Humidity (%)', color='b')
-    plt.legend()
-    plt.title('Temperature and Humidity')
-    plt.xlabel('Time')
-    plt.xticks(rotation=45)
-    plt.tight_layout()
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
 
+    # 温度グラフ
+    ax1.plot(df['timestamp'], df['temperature'], 'r-', label='Temperature (°C)')
+    ax1.axhline(y=TEMP_MAX, color='r', linestyle='--', alpha=0.5)
+    ax1.axhline(y=TEMP_MIN, color='b', linestyle='--', alpha=0.5)
+    ax1.set_title('Temperature Variation')
+    ax1.legend()
+
+    # 湿度グラフ
+    ax2.plot(df['timestamp'], df['humidity'], 'b-', label='Humidity (%)')
+    ax2.axhline(y=HUMIDITY_MAX, color='r', linestyle='--', alpha=0.5)
+    ax2.axhline(y=HUMIDITY_MIN, color='b', linestyle='--', alpha=0.5)
+    ax2.set_title('Humidity Variation')
+    ax2.legend()
+
+    plt.tight_layout()
     plt.savefig(file_name)
     plt.close()
     return file_name
@@ -186,4 +192,26 @@ def main():
         time.sleep(5)  # 5秒ごとに温湿度を読み取って表示（お好みで調整）
 
 if __name__ == "__main__":
-    main()
+
+def save_to_db(humidity, temperature):
+    """SQLiteにデータを保存する機能"""
+    timestamp = datetime.datetime.now()
+    with sqlite3.connect('sensor_data.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO measurements (timestamp, temperature, humidity)
+            VALUES (?, ?, ?)
+        ''', (timestamp, temperature, humidity))
+
+def generate_stats_report():
+    df = pd.read_csv(CSV_FILE, names=['timestamp', 'temperature', 'humidity'], skiprows=1)
+    stats = {
+        '平均温度': df['temperature'].mean(),
+        '最高温度': df['temperature'].max(),
+        '最低温度': df['temperature'].min(),
+        '平均湿度': df['humidity'].mean(),
+        '最高湿度': df['humidity'].max(),
+        '最低湿度': df['humidity'].min()
+    }
+    return '\n'.join([f'{k}: {v:.1f}' for k, v in stats.items()])
+
