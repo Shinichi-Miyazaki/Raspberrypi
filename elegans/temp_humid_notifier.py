@@ -53,9 +53,13 @@ def check_alerts(temperature, humidity):
 
 def send_slack_message(message):
     try:
-        client.chat_postMessage(channel=SLACK_CHANNEL, text=message)
+        response = client.chat_postMessage(channel=SLACK_CHANNEL, text=message)
+        if not response['ok']:
+            print(f"Slack送信エラー: {response['error']}")
     except SlackApiError as e:
-        print(f"Error sending message: {e.response['error']}")
+        print(f"Slack API エラー: {e.response['error']}")
+    except Exception as e:
+        print(f"予期せぬエラー: {str(e)}")
 
 def create_advanced_graph(file_name, start_time=None, end_time=None):
     df = pd.read_csv(CSV_FILE, names=['timestamp', 'temperature', 'humidity'], skiprows=1)
@@ -214,4 +218,15 @@ def generate_stats_report():
         '最低湿度': df['humidity'].min()
     }
     return '\n'.join([f'{k}: {v:.1f}' for k, v in stats.items()])
+
+def test_slack_connection():
+    try:
+        response = client.chat_postMessage(
+            channel=SLACK_CHANNEL,
+            text="接続テスト: センサー監視システムが起動しました"
+        )
+        return response['ok']
+    except Exception as e:
+        print(f"接続テストエラー: {str(e)}")
+        return False
 
