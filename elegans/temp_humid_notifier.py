@@ -74,39 +74,111 @@ def check_thresholds(temperature, humidity):
     elif humidity < HUMIDITY_MIN:
         alerts.append(f"警告: 湿度低下 ({humidity}%)")
     return alerts
+import matplotlib.pyplot as plt
+import pandas as pd
+
+def create_graph(csv_path, output_path, start_time=None, end_time=None):
+    try:
+        df = pd.read_csv(csv_path, names=['timestamp', 'temperature', 'humidity'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+        if start_time:
+            df = df[df['timestamp'] >= start_time]
+        if end_time:
+            df = df[df['timestamp'] <= end_time]
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+
+        # 温度プロット
+        ax1.plot(df['timestamp'], df['temperature'], 'r-')
+        ax1.set_title('Temperature (°C)')
+        ax1.grid(True)
+
+        # 湿度プロット
+        ax2.plot(df['timestamp'], df['humidity'], 'b-')
+        ax2.set_title('Humidity (%)')
+        ax2.grid(True)
+
+        plt.tight_layout()
+        plt.savefig(output_path)
+        plt.close()
+        return True
+    except Exception as e:
+        print(f"グラフ作成エラー: {str(e)}")
+        return False
+
+def send_slack_files(client, graph_path, csv_path, title_prefix):
+    try:
+        # グラフ送信
+        client.files_upload(
+            channels=SLACK_CHANNEL,
+            file=graph_path,
+            title=f"{title_prefix} - グラフ"
+        )
+        # CSV送信
+        client.files_upload(
+            channels=SLACK_CHANNEL,
+            file=csv_path,
+            title=f"{title_prefix} - データ"
+        )
+        return True
+    except SlackApiError as e:
+        print(f"ファイル送信エラー: {e.response['error']}")
+        return False
 
 def main():
     args = parse_args()
     os.makedirs(args.save_dir, exist_ok=True)
     csv_path = os.path.join(args.save_dir, 'temperature_log.csv')
 
-    # Slackクライアント初期化
     client = WebClient(token=SLACK_TOKEN)
-
-    # Slack接続確認
     if not verify_slack_connection(client):
-        print("Slack接続に失敗しました")
         return
 
-    # CSVファイル初期化
     if not os.path.exists(csv_path):
         with open(csv_path, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['timestamp', 'temperature', 'humidity'])
 
+    start_time = datetime.datetime.now()
+    ten_min_report_sent = False
+    last_weekly_report = start_time
+
     print("センサー監視を開始します")
     while True:
+        current_time = datetime.datetime.now()
+        elapsed_minutes = (current_time - start_time).total_seconds() / 60
+
+        # 10分経過時のレポート
+        if elapsed_minutes >= 10 and not ten_min_report_sent:
+            graph_path = os.path.join(args.save_dir, '10min_graph.png')
+            temp_csv = os.path.join(args.save_dir, '10min_data.csv')
+
+            if create_graph(csv_path, graph_path, start_time, current_time):
+                pd.read_csv(csv_path).to_csv(temp_csv, index=False)
+                send_slack_files(client, graph_path, temp_csv, "10分間レポート")
+
+            ten_min_report_sent = True
+
+        # 週次レポート
+        days_since_last_report = (current_time - last_weekly_report).days
+        if days_since_last_report >= 7:
+            graph_path = os.path.join(args.save_dir, 'weekly_graph.png')
+            temp_csv = os.path.join(args.save_dir, 'weekly_data.csv')
+
+            if create_graph(csv_path, graph_path):
+                pd.read_csv(csv_path).to_csv(temp_csv, index=False)
+                send_slack_files(client, graph_path, temp_csv, "週間レポート")
+
+            last_weekly_report = current_time
+
+        # 通常の測定処理
         humidity, temperature = read_sensor()
-
         if humidity is not None and temperature is not None:
-            # データ保存
             save_to_csv(csv_path, humidity, temperature)
-
-            # 現在値表示
-            print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+            print(f"[{current_time.strftime('%Y-%m-%d %H:%M:%S')}] "
                   f"温度: {temperature}°C, 湿度: {humidity}%")
 
-            # アラートチェック
             alerts = check_thresholds(temperature, humidity)
             for alert in alerts:
                 try:
@@ -114,7 +186,7 @@ def main():
                 except SlackApiError as e:
                     print(f"Slack送信エラー: {e.response['error']}")
 
-        time.sleep(5)  # 5秒間隔で測定
+        time.sleep(30)
 
 if __name__ == "__main__":
     main()
