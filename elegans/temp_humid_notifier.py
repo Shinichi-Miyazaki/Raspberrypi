@@ -25,6 +25,7 @@ SHORT_REPORT_INTERVAL = 10     # 定期的に送信する短報告の間隔(分)
 LONG_REPORT_INTERVAL = 7       # 定期的に送信する週報告の間隔(日)
 CSV_FILENAME = 'temperature_log.csv'  # センサー情報を記録するCSVファイル名
 CHANNEL_ID = "XXXXXXX"          # SlackのチャンネルID（チャンネル名ではない）
+ALERT_COOLDOWN = 18000  # 警告の再通知間隔（秒）
 # =============================================================================
 
 def parse_args():
@@ -81,23 +82,45 @@ def save_to_csv(csv_path, humidity, temperature):
     with open(csv_path, 'a', newline='') as f:
         writer = csv.writer(f)
         writer.writerow([timestamp, temperature, humidity])
+# グローバル変数として警告状態を管理する辞書を追加
+alert_states = {
+    'temp_high': {'active': False, 'last_sent': None},
+    'temp_low': {'active': False, 'last_sent': None},
+    'humidity_high': {'active': False, 'last_sent': None},
+    'humidity_low': {'active': False, 'last_sent': None}
+}
+
 
 def check_thresholds(temperature, humidity):
     """
     温度・湿度のしきい値を監視し、異常があればアラートメッセージを返す。
-    しきい値を超えた場合や下回った場合の警告文をリストとして返す。
+    一定時間内の重複した警告はスキップする。
     """
+    current_time = datetime.datetime.now()
     alerts = []
-    if temperature > TEMP_MAX:
-        alerts.append(f"警告: 温度上昇 ({temperature}°C)")
-    elif temperature < TEMP_MIN:
-        alerts.append(f"警告: 温度低下 ({temperature}°C)")
-    if humidity > HUMIDITY_MAX:
-        alerts.append(f"警告: 湿度上昇 ({humidity}%)")
-    elif humidity < HUMIDITY_MIN:
-        alerts.append(f"警告: 湿度低下 ({humidity}%) add water to humidifier")
-    return alerts
 
+    if temperature > TEMP_MAX:
+        if not alert_states['temp_high']['active'] or \
+            (alert_states['temp_high']['last_sent'] and
+            (current_time - alert_states['temp_high']['last_sent']).total_seconds() > ALERT_COOLDOWN):
+            alerts.append(f"警告: 温度上昇 ({temperature}°C)")
+            alert_states['temp_high']['active'] = True
+            alert_states['temp_high']['last_sent'] = current_time
+    else:
+        alert_states['temp_high']['active'] = False
+
+    # 他の条件も同様に処理
+    if humidity < HUMIDITY_MIN:
+        if not alert_states['humidity_low']['active'] or \
+            (alert_states['humidity_low']['last_sent'] and
+            (current_time - alert_states['humidity_low']['last_sent']).total_seconds() > ALERT_COOLDOWN):
+            alerts.append(f"警告: 湿度低下 ({humidity}%) add water to humidifier")
+            alert_states['humidity_low']['active'] = True
+            alert_states['humidity_low']['last_sent'] = current_time
+    else:
+        alert_states['humidity_low']['active'] = False
+
+    return alerts
 def create_graph(csv_path, output_path, start_time=None, end_time=None):
     """
     ログCSVを読み込み、指定された期間内の温度・湿度の推移をグラフ化してファイル出力する。
