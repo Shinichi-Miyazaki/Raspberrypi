@@ -16,16 +16,16 @@ SENSOR = Adafruit_DHT.DHT22    # 利用するセンサーの種類
 PIN = 4                        # センサーを接続しているGPIOピン番号（BCM番号）
 SLACK_TOKEN = 'xoxb-your-token'  # SlackのBot User OAuth Token
 SLACK_CHANNEL = '#sensor-notify'  # Slackの通知送信先チャンネル
-TEMP_MAX = 30                  # 温度の上限しきい値(°C)
-TEMP_MIN = 10                  # 温度の下限しきい値(°C)
-HUMIDITY_MAX = 80              # 湿度の上限しきい値(%)
-HUMIDITY_MIN = 30              # 湿度の下限しきい値(%)
+TEMP_MAX = 23                  # 温度の上限しきい値(°C)
+TEMP_MIN = 17                  # 温度の下限しきい値(°C)
+HUMIDITY_MAX = 70              # 湿度の上限しきい値(%)
+HUMIDITY_MIN = 40              # 湿度の下限しきい値(%)
 CHECK_INTERVAL = 30            # センサー測定間隔 (秒)
-SHORT_REPORT_INTERVAL = 10     # 定期的に送信する短報告の間隔(分)
-LONG_REPORT_INTERVAL = 7       # 定期的に送信する週報告の間隔(日)
+SHORT_REPORT_INTERVAL = 30     # 定期的に送信する短報告の間隔(分)
+LONG_REPORT_INTERVAL = 1       # 定期的に送信する週報告の間隔(日)
 CSV_FILENAME = 'temperature_log.csv'  # センサー情報を記録するCSVファイル名
 CHANNEL_ID = "XXXXXXX"          # SlackのチャンネルID（チャンネル名ではない）
-ALERT_COOLDOWN = 18000  # 警告の再通知間隔（秒）
+ALERT_COOLDOWN = 43200  # 警告の再通知間隔（秒）
 # =============================================================================
 
 def parse_args():
@@ -100,22 +100,18 @@ def check_thresholds(temperature, humidity):
     alerts = []
 
     if temperature > TEMP_MAX:
-        if not alert_states['temp_high']['active'] or \
-            (alert_states['temp_high']['last_sent'] and
+        if (alert_states['temp_high']['last_sent'] is None or
             (current_time - alert_states['temp_high']['last_sent']).total_seconds() > ALERT_COOLDOWN):
-            alerts.append(f"警告: 温度上昇 ({temperature}°C)")
-            alert_states['temp_high']['active'] = True
+            alerts.append(f"警告: 温度上昇 ({temperature}°C) 以後12時間は警告を出しません。")
             alert_states['temp_high']['last_sent'] = current_time
     else:
         alert_states['temp_high']['active'] = False
 
     # 他の条件も同様に処理
     if humidity < HUMIDITY_MIN:
-        if not alert_states['humidity_low']['active'] or \
-            (alert_states['humidity_low']['last_sent'] and
+        if (alert_states['humidity_low']['last_sent'] is None or
             (current_time - alert_states['humidity_low']['last_sent']).total_seconds() > ALERT_COOLDOWN):
-            alerts.append(f"警告: 湿度低下 ({humidity}%) add water to humidifier")
-            alert_states['humidity_low']['active'] = True
+            alerts.append(f"警告: 湿度低下 ({humidity}%) add water to humidifier 以後12時間は警告を出しません。")
             alert_states['humidity_low']['last_sent'] = current_time
     else:
         alert_states['humidity_low']['active'] = False
