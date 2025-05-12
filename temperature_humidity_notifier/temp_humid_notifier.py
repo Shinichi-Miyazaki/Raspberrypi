@@ -1,182 +1,163 @@
-import adafruit_dht
+import os
+import csv
 import time
 import datetime
-import csv
-import os
 import argparse
 import random
+import traceback
+
+# --- Adafruit CircuitPython DHT 用 -----------------------------------------
+import board                       # ← NEW
+import adafruit_dht                # ← NEW
+# ---------------------------------------------------------------------------
+
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 import matplotlib.pyplot as plt
 import pandas as pd
-import traceback
 
 # =============================================================================
 # 設定パラメータ（必要に応じて変更）
 # =============================================================================
-SENSOR = adafruit_dht.DHT22    # 利用するセンサーの種類
-PIN = 4                        # センサーを接続しているGPIOピン番号（BCM番号）
-SLACK_TOKEN = ''  # SlackのBot User OAuth Token
-SLACK_CHANNEL = ''  # Slackの通知送信先チャンネル
-channel_id = ""
-TEMP_MAX = 23                  # 温度の上限しきい値(°C)
-TEMP_MIN = 17                  # 温度の下限しきい値(°C)
-HUMIDITY_MAX = 70              # 湿度の上限しきい値(%)
-HUMIDITY_MIN = 40              # 湿度の下限しきい値(%)
-CHECK_INTERVAL = 30            # センサー測定間隔 (秒)
-SHORT_REPORT_INTERVAL = 30     # 定期的に送信する短報告の間隔(分)
-LONG_REPORT_INTERVAL = 1       # 定期的に送信する週報告の間隔(日)
-CSV_FILENAME = 'temperature_log.csv'  # センサー情報を記録するCSVファイル名
-ALERT_COOLDOWN = 43200         # 警告の再通知間隔（秒）
-SAVE_DIR = ""  # ログファイルの保存先ディレクトリ
+DHT_PIN = board.D4                 # ← BCM4 に相当。board.D4 へ変更
+SLACK_TOKEN = ''                   # Slack Bot User OAuth Token
+SLACK_CHANNEL = ''                 # チャンネル名（"#xxxx" もしくは "CXXXXXXXX"）
+channel_id = ''                    # ファイル送信時に使う場合セットしておく
+TEMP_MAX = 23
+TEMP_MIN = 17
+HUMIDITY_MAX = 70
+HUMIDITY_MIN = 40
+CHECK_INTERVAL = 30                # (秒)
+SHORT_REPORT_INTERVAL = 30         # (分)
+LONG_REPORT_INTERVAL = 1           # (日)
+CSV_FILENAME = 'temperature_log.csv'
+ALERT_COOLDOWN = 43200             # (秒)
+SAVE_DIR = ''
 
-
-# テストモード設定
-TEST_MODE = True               # テストモードを有効にする場合はTrue、実際のセンサーを使う場合はFalse
-TEST_DATA_VARIATION = True     # テストデータをランダムに変化させる場合はTrue、固定値の場合はFalse
-TEST_TEMP_BASE = 20.0          # テストモード時の基本温度 (°C)
-TEST_HUMID_BASE = 50.0         # テストモード時の基本湿度 (%)
-TEST_GENERATE_ALERTS = True    # テストモード時にアラートを生成するための異常値を定期的に発生させる
+# テストモード
+TEST_MODE = True
+TEST_DATA_VARIATION = True
+TEST_TEMP_BASE = 20.0
+TEST_HUMID_BASE = 50.0
+TEST_GENERATE_ALERTS = True
 # =============================================================================
 
-def parse_args():
-    """
-    コマンドライン引数のパースを行います。
-      --save-dir : センサーのログデータやグラフを保存するディレクトリを指定
-    """
+
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='温湿度モニタリングシステム')
-    parser.add_argument(
-        '--save-dir',
-        default=SAVE_DIR,
-        help=f'ログファイルの保存先ディレクトリ（デフォルト: {SAVE_DIR}）'
-    )
+    parser.add_argument('--save-dir',
+                        default=SAVE_DIR,
+                        help=f'ログファイルの保存先ディレクトリ（デフォルト: {SAVE_DIR}）')
     return parser.parse_args()
 
-def verify_slack_connection(client):
-    """
-    Slackとの接続テストを行い、問題なければTrue、失敗ならFalseを返す。
-    また、チャンネルが存在しない場合や、Tokenが不正な場合等はエラーメッセージを表示する。
-    """
+
+def verify_slack_connection(client: WebClient) -> bool:
     try:
         auth_test = client.auth_test()
         print(f"Slack認証成功: {auth_test['user']}")
-
-        # 接続テスト用のメッセージを送信
-        client.chat_postMessage(
-            channel=SLACK_CHANNEL,
-            text=f"センサーシステム起動: 接続テスト成功 {'[テストモード]' if TEST_MODE else ''}"
-        )
+        client.chat_postMessage(channel=SLACK_CHANNEL,
+                                text=f"センサーシステム起動: 接続テスト成功 "
+                                     f"{'[テストモード]' if TEST_MODE else ''}")
         return True
-
     except Exception as e:
-        print(f"Slack接続エラー: {str(e)}")
+        print(f"Slack接続エラー: {e}")
         return False
+
+
+# --- DHT22 センサーを一度だけ初期化 ----------------------------------------
+if not TEST_MODE:
+    # Raspberry Pi 4 では use_pulseio=False が推奨
+    dht_device = adafruit_dht.DHT22(DHT_PIN, use_pulseio=False)
+else:
+    dht_device = None                                                  # テスト用ダミー
+# ---------------------------------------------------------------------------
+
 
 def read_sensor():
     """
-    センサーを読み取り、湿度(humidity)と温度(temperature)を取得する。
-    テストモードの場合は、疑似的なデータを生成する。
-    取得に成功した場合は(湿度, 温度)のタプルを返すが、失敗した場合は(None, None)を返す。
+    (humidity, temperature) を返す。
+    取得失敗時は (None, None)。
     """
     if TEST_MODE:
-        # テストモードでのデータ生成
-        # まず基本値で初期化
         temperature = TEST_TEMP_BASE
         humidity = TEST_HUMID_BASE
 
         if TEST_DATA_VARIATION:
-            # 実際のセンサーの挙動を模倣するためにランダムな変動を加える
-            temp_variation = random.uniform(-0.5, 0.5)
-            humid_variation = random.uniform(-2.0, 2.0)
-            temperature += temp_variation
-            humidity += humid_variation
-
-            # アラートを生成するための異常値を時々発生させる
-            if TEST_GENERATE_ALERTS and random.random() < 0.1:  # 10%の確率で異常値
+            temperature += random.uniform(-0.5, 0.5)
+            humidity += random.uniform(-2.0, 2.0)
+            if TEST_GENERATE_ALERTS and random.random() < 0.1:
                 if random.random() < 0.5:
-                    # 高温または低温
-                    temperature = TEMP_MAX + 2.0 if random.random() < 0.5 else TEMP_MIN - 2.0
+                    temperature = TEMP_MAX + 2 if random.random() < 0.5 else TEMP_MIN - 2
                 else:
-                    # 高湿度または低湿度
-                    humidity = HUMIDITY_MAX + 5.0 if random.random() < 0.5 else HUMIDITY_MIN - 5.0
+                    humidity = HUMIDITY_MAX + 5 if random.random() < 0.5 else HUMIDITY_MIN - 5
 
         return round(humidity, 3), round(temperature, 3)
-    else:
-        # 実際のセンサーからデータを読み取る
-        try:
-            humidity, temperature = adafruit_dht.read_retry(SENSOR, PIN)
-            if humidity is not None and temperature is not None:
-                return round(humidity, 3), round(temperature, 3)
-            print("センサーからのデータ取得に失敗しました。再試行します...")
-            return None, None
-        except Exception as e:
-            print(f"センサー読み取りエラー: {str(e)}")
-            return None, None
+
+    # --- 実機読み取り -------------------------------------------------------
+    try:
+        temperature = dht_device.temperature         # °C
+        humidity = dht_device.humidity               # %
+        if humidity is not None and temperature is not None:
+            return round(humidity, 3), round(temperature, 3)
+        print("センサーからのデータ取得に失敗しました。再試行します...")
+        return None, None
+    except RuntimeError as e:
+        # 読み取り失敗はよく起こるのでログだけ
+        print(f"DHT 取得失敗: {e}")
+        return None, None
+    except Exception as e:
+        # その他クリティカルな例外はセンサーをリセット
+        print(f"DHT 重大エラー: {e}")
+        dht_device.exit()
+        time.sleep(2)
+        return None, None
+    # ----------------------------------------------------------------------
+
 
 def save_to_csv(csv_path, humidity, temperature):
-    """
-    CSVファイルに、タイムスタンプと温度、湿度の情報を追記保存する。
-      csv_path : 書き込み先のCSVファイルパス
-      humidity : 湿度
-      temperature : 温度
-    """
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     try:
-        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with open(csv_path, 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([timestamp, temperature, humidity])
+            csv.writer(f).writerow([timestamp, temperature, humidity])
     except Exception as e:
-        print(f"CSVファイル書き込みエラー: {str(e)}")
+        print(f"CSV書き込みエラー: {e}")
 
-# グローバル変数として警告状態を管理する辞書を追加
+
+# 重複通知抑制用タイムスタンプのみ保持
 alert_states = {
-    'temp_high': {'active': False, 'last_sent': None},
-    'temp_low': {'active': False, 'last_sent': None},
-    'humidity_high': {'active': False, 'last_sent': None},
-    'humidity_low': {'active': False, 'last_sent': None}
+    'temp_high': None,
+    'temp_low': None,
+    'humidity_high': None,
+    'humidity_low': None
 }
 
+
 def check_thresholds(temperature, humidity):
-    """
-    温度・湿度のしきい値を監視し、異常があればアラートメッセージを返す。
-    一定時間内の重複した警告はスキップする。
-    """
-    current_time = datetime.datetime.now()
+    current = datetime.datetime.now()
     alerts = []
 
-    if temperature > TEMP_MAX:
-        if (alert_states['temp_high']['last_sent'] is None or
-            (current_time - alert_states['temp_high']['last_sent']).total_seconds() > ALERT_COOLDOWN):
-            alerts.append(f"警告: 温度上昇 ({temperature}°C) 以後12時間は警告を出しません。")
-            alert_states['temp_high']['last_sent'] = current_time
-    else:
-        alert_states['temp_high']['active'] = False
+    def ok_to_send(key):
+        last = alert_states[key]
+        return last is None or (current - last).total_seconds() > ALERT_COOLDOWN
 
-    if temperature < TEMP_MIN:
-        if (alert_states['temp_low']['last_sent'] is None or
-            (current_time - alert_states['temp_low']['last_sent']).total_seconds() > ALERT_COOLDOWN):
-            alerts.append(f"警告: 温度低下 ({temperature}°C) 以後12時間は警告を出しません。")
-            alert_states['temp_low']['last_sent'] = current_time
-    else:
-        alert_states['temp_low']['active'] = False
+    if temperature > TEMP_MAX and ok_to_send('temp_high'):
+        alerts.append(f"警告: 温度上昇 ({temperature}°C) 以後12時間は警告を出しません。")
+        alert_states['temp_high'] = current
 
-    if humidity > HUMIDITY_MAX:
-        if (alert_states['humidity_high']['last_sent'] is None or
-            (current_time - alert_states['humidity_high']['last_sent']).total_seconds() > ALERT_COOLDOWN):
-            alerts.append(f"警告: 湿度上昇 ({humidity}%) 以後12時間は警告を出しません。")
-            alert_states['humidity_high']['last_sent'] = current_time
-    else:
-        alert_states['humidity_high']['active'] = False
+    if temperature < TEMP_MIN and ok_to_send('temp_low'):
+        alerts.append(f"警告: 温度低下 ({temperature}°C) 以後12時間は警告を出しません。")
+        alert_states['temp_low'] = current
 
-    if humidity < HUMIDITY_MIN:
-        if (alert_states['humidity_low']['last_sent'] is None or
-            (current_time - alert_states['humidity_low']['last_sent']).total_seconds() > ALERT_COOLDOWN):
-            alerts.append(f"警告: 湿度低下 ({humidity}%) add water to humidifier 以後12時間は警告を出しません。")
-            alert_states['humidity_low']['last_sent'] = current_time
-    else:
-        alert_states['humidity_low']['active'] = False
+    if humidity > HUMIDITY_MAX and ok_to_send('humidity_high'):
+        alerts.append(f"警告: 湿度上昇 ({humidity}%) 以後12時間は警告を出しません。")
+        alert_states['humidity_high'] = current
+
+    if humidity < HUMIDITY_MIN and ok_to_send('humidity_low'):
+        alerts.append(f"警告: 湿度低下 ({humidity}%) add water to humidifier 以後12時間は警告を出しません。")
+        alert_states['humidity_low'] = current
 
     return alerts
+
 
 def create_graph(csv_path, output_path, start_time=None, end_time=None):
     """
