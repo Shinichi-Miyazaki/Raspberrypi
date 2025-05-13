@@ -67,7 +67,8 @@ def verify_slack_connection(client: WebClient) -> bool:
 # --- DHT22 センサーを一度だけ初期化 ----------------------------------------
 if not TEST_MODE:
     # Raspberry Pi 4 では use_pulseio=False が推奨
-    dht_device = adafruit_dht.DHT22(DHT_PIN, use_pulseio=False)
+    # という風にいわれているが、どうやらadafruit_circuitpython_dht とは相性が悪いようなので、ないほうが良い
+    dht_device = adafruit_dht.DHT22(DHT_PIN,)
 else:
     dht_device = None                                                  # テスト用ダミー
 # ---------------------------------------------------------------------------

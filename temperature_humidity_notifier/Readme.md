@@ -23,10 +23,11 @@
 DHT22/DHT11センサーとRaspberry Piを以下のように接続します：
 
 - VCC（+）：Raspberry PiのGPIO 5V（Pin 2またはPin 4）に接続   
-- DATA（out）：Raspberry PiのGPIO 4（Pin 7 - BCM番号）に接続  
-- 4.7kΩまたは10kΩの抵抗でプルアップ（VCCとDATAの間に接続）   
+- DATA（out）：Raspberry PiのGPIO 4（Pin 7 - BCM番号）に接続
 - GND（-）：Raspberry PiのGND（Pin 6、9、14、20、25、30、34、39のいずれか）に接続   
 ※ DHT11の場合はセンサーによっては内部プルアップ抵抗を持っているものもあるため、外部抵抗が不要な場合があります。
+少なくともDHT22のセンサーモジュールとして売られているものは内部抵抗を持っているのでいらないと思われます。  
+例 (https://electronicwork.shop/items/61fc88ba47a5344c4730cb42?utm_source=google&utm_medium=gmc&srsltid=AfmBOooyTZ6hxb0S18PHY42GGxGnMqOXSW3hyGZ9nJtrBbED3p-3KuP_HFs&gQT=2)
 
 ## セットアップ手順
 1. Raspberry Pi OSのセットアップ
@@ -44,13 +45,17 @@ sudo apt-get install -y python3-matplotlib
 ```
 
 3. 必要なPythonライブラリのインストール   
+20250513追記  
+OSによってはpipでglobal環境にインストールできなくなっているようです。
+その場合には仮想環境内にインストールするか、pip install <package name> --break-system-packages としてインストールする必要があります。  
+
  
 ```
 pip install adafruit-circuitpython-dht
 pip install slack_sdk
 pip install pandas matplotlib
+pip install board
 ```
-
 
 ## Slack設定
 1. Slackアプリの作成
