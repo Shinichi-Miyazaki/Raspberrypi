@@ -27,7 +27,7 @@ TEMP_MAX = 23
 TEMP_MIN = 17
 HUMIDITY_MAX = 70
 HUMIDITY_MIN = 40
-CHECK_INTERVAL = 30                # (秒)
+CHECK_INTERVAL = 600               # (秒)
 SHORT_REPORT_INTERVAL = 30         # (分)
 LONG_REPORT_INTERVAL = 1           # (日)
 CSV_FILENAME = 'temperature_log.csv'
@@ -232,24 +232,19 @@ def send_slack_files(client, graph_path, csv_path, title_prefix):
         print(f"グラフファイルサイズ: {os.path.getsize(graph_path)} bytes")
         print(f"CSVファイルサイズ: {os.path.getsize(csv_path)} bytes")
 
-        print(f"使用するチャンネル: {SLACK_CHANNEL}")
-        print(f"チャンネルID: {channel_id}")
+        # 使用するチャンネルを決定 (channel_idが空の場合はSLACK_CHANNELを使用)
+        target_channel = channel_id if channel_id else SLACK_CHANNEL
+        print(f"使用するチャンネル: {target_channel}")
 
-        # テストメッセージ
-        response = client.chat_postMessage(
-            channel=channel_id,
-            text=f"ファイル送信テスト: {title_prefix}"
-        )
-
-        # ファイル送信でもチャンネルIDを使用
+        # ファイル送信
         client.files_upload_v2(
-            channels=[channel_id],  # チャンネルIDをリストとして渡す
+            channels=[target_channel],  # チャンネルIDをリストとして渡す
             file=graph_path,
             title=f"{title_prefix} - グラフ"
         )
 
         client.files_upload_v2(
-            channels=[channel_id],
+            channels=[target_channel],
             file=csv_path,
             title=f"{title_prefix} - データ"
         )
@@ -295,7 +290,9 @@ def main():
         # レポート送信の基準時間などを変数に保持
         start_time = datetime.datetime.now()
         ten_min_report_sent = False
-        last_weekly_report = start_time
+
+        # 長期レポートの初期時間を現在時間から1日前に設定して早く送信できるようにする
+        last_weekly_report = start_time - datetime.timedelta(days=LONG_REPORT_INTERVAL - 0.1)
 
         if TEST_MODE:
             print("テストモードでセンサー監視を開始します")
@@ -330,24 +327,40 @@ def main():
 
                 ten_min_report_sent = True
 
-            # 週次レポート
-            days_since_last_report = (current_time - last_weekly_report).days
+            # 週次レポート - 修正部分
+            time_since_last_report = (current_time - last_weekly_report).total_seconds()
+            days_since_last_report = time_since_last_report / (24 * 3600)  # 秒数から日数を計算
+
             if days_since_last_report >= LONG_REPORT_INTERVAL:
                 graph_path = os.path.join(args.save_dir, 'weekly_graph.png')
                 temp_csv = os.path.join(args.save_dir, 'weekly_data.csv')
 
-                print(f"{LONG_REPORT_INTERVAL}日レポートを作成中...")
+                print(f"{LONG_REPORT_INTERVAL}日レポートを作成中... ({days_since_last_report:.2f}日経過)")
                 # 直近の期間のみを対象にグラフとCSVを作成する
-                if create_graph(csv_path, graph_path, last_weekly_report, current_time):
+                report_start_time = last_weekly_report
+                if create_graph(csv_path, graph_path, report_start_time, current_time):
                     try:
                         df_weekly = pd.read_csv(csv_path, header=0)
                         df_weekly['timestamp'] = pd.to_datetime(df_weekly['timestamp'], errors='coerce')
                         # 前回のレポート以降のみ取得
-                        mask = (df_weekly['timestamp'] >= last_weekly_report) & (df_weekly['timestamp'] <= current_time)
+                        mask = (df_weekly['timestamp'] >= report_start_time) & (df_weekly['timestamp'] <= current_time)
                         df_weekly = df_weekly.loc[mask]
-                        df_weekly.to_csv(temp_csv, index=False)
-                        send_slack_files(client, graph_path, temp_csv, f"{LONG_REPORT_INTERVAL}日間レポート")
-                        print(f"{LONG_REPORT_INTERVAL}日レポートをSlackに送信しました")
+
+                        # データが存在する場合のみCSVを作成して送信
+                        if not df_weekly.empty:
+                            df_weekly.to_csv(temp_csv, index=False)
+
+                            # channel_idが空文字列の場合はSLACK_CHANNELを使用
+                            target_channel = channel_id if channel_id else SLACK_CHANNEL
+                            client.chat_postMessage(
+                                channel=target_channel,
+                                text=f"{LONG_REPORT_INTERVAL}日間レポートを送信します"
+                            )
+
+                            send_slack_files(client, graph_path, temp_csv, f"{LONG_REPORT_INTERVAL}日間レポート")
+                            print(f"{LONG_REPORT_INTERVAL}日レポートをSlackに送信しました")
+                        else:
+                            print("レポート期間内にデータがありません")
                     except Exception as e:
                         print(f"レポート送信中にエラーが発生しました: {str(e)}")
                         traceback.print_exc()
