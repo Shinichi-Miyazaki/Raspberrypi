@@ -421,6 +421,24 @@ def main():
             client.chat_postMessage(channel=SLACK_CHANNEL, text=error_message)
         except:
             pass
+    finally:
+        # プログラム終了時の後処理
+        print("リソースをクリーンアップしています...")
+
+        # DHTデバイスが初期化されている場合は終了処理
+        if not TEST_MODE and dht_device is not None:
+            try:
+                dht_device.exit()
+                print("DHT22センサー接続を終了しました")
+            except:
+                pass
+
+        # GPIO設定をクリーンアップ
+        try:
+            GPIO.cleanup()
+            print("GPIOリソースをクリーンアップしました")
+        except:
+            pass
 
 if __name__ == "__main__":
     main()
