@@ -55,6 +55,7 @@ pip install adafruit-circuitpython-dht
 pip install slack_sdk
 pip install pandas matplotlib
 pip install board
+pip install RPi.GPIO
 ```
 
 ## Slack設定
@@ -133,6 +134,47 @@ Botがチャンネルに招待されているか確認
 チャンネルIDを直接使用する（Slackの応答から取得したID）
 ファイルパスが正しいことを確認し、ファイルが存在するかチェック
 channelsパラメータはリスト形式で渡す（例: [channel_id]）
+
+### GPIOの初期化エラー
+adafruit_circuitpython_dhtではuse_pulseio=Falseの設定が相性が悪いようである。
+そこでuse_pulseio=Falseを削除しているが、こうすると一度起動した後にGPIOがうまく動かない 「unable to set line XX to input」
+というエラーが起こる。
+このエラーに対応するために、スクリプト使用後にGPIOをクリーンアップするコードを実装しているが、うまくいっているかが不明。
+
+### Wifiの接続が切れる問題
+定期的にwifiが切れる。
+reconnect_wifi.pyというコードを実装済み。
+こちらに対して、
+
+スクリプトを実行可能に
+```
+chmod +x reconnect_wifi.py
+```
+
+ファイルの追加
+```
+sudo nano /etc/systemd/system/wifi-monitor.service
+```
+以下のファイルをnanoで作成
+```
+[Unit]
+Description=WiFi Connection Monitor
+After=network.target
+[Service]
+ExecStart=/usr/bin/python3 /path/to/reconnect_wifi.py
+Restart=always
+User=pi
+[Install]
+WantedBy=multi-user.target
+```
+/path/to/reconnect_wifi.py の部分は、実際のスクリプトのフルパスに置き換えてください。
+Ctrl+Oでファイルを保存し、Ctrl+Xでnanoエディタを終了します。
+最後に、サービスを有効化して起動します：
+```
+sudo systemctl enable wifi-monitor.service
+sudo systemctl start wifi-monitor.service
+```
+以上で現状はうまくいっている。
 
 ## 参考資料
 ハードウェア・配線: SunFounder DHT11センサー解説（https://docs.sunfounder.com/projects/umsk/ja/latest/05_raspberry_pi/pi_lesson19_dht11.html）

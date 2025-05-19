@@ -5,6 +5,7 @@ import datetime
 import argparse
 import random
 import traceback
+import RPi.GPIO as GPIO
 
 # --- Adafruit CircuitPython DHT 用 -----------------------------------------
 import board                       # ← NEW
