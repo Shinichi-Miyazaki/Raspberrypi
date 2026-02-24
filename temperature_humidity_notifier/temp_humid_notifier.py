@@ -40,8 +40,8 @@ logger = logging.getLogger(__name__)
 # 設定パラメータ（必要に応じて変更）
 # =============================================================================
 DHT_PIN = board.D4                 # ← BCM4 に相当。board.D4 へ変更
-SLACK_TOKEN = ''                   # Slack Bot User OAuth Token
-SLACK_CHANNEL = ''                 # チャンネル名（"#xxxx" もしくは "CXXXXXXXX"）
+SLACK_TOKEN = os.environ.get('SLACK_TOKEN', '')    # 環境変数 SLACK_TOKEN から取得
+SLACK_CHANNEL = os.environ.get('SLACK_CHANNEL', '') # 環境変数 SLACK_CHANNEL から取得
 channel_id = ''                    # ファイル送信時に使う場合セットしておく
 TEMP_MAX = 23
 TEMP_MIN = 17
@@ -52,17 +52,17 @@ SHORT_REPORT_INTERVAL = 30         # (分)
 LONG_REPORT_INTERVAL = 1           # (日)
 CSV_FILENAME = 'temperature_log.csv'
 ALERT_COOLDOWN = 43200             # (秒)
-SAVE_DIR = ''
+SAVE_DIR = '.'                     # デフォルトはカレントディレクトリ
 
-# テストモード
-TEST_MODE = True
+# テストモード（--test-mode CLI引数で有効化。デフォルトはFalse）
+TEST_MODE = False
 TEST_DATA_VARIATION = True
 TEST_TEMP_BASE = 20.0
 TEST_HUMID_BASE = 50.0
 TEST_GENERATE_ALERTS = True
 
 # ネットワーク診断用設定
-ROUTER_IP = '192.168.1.1'          # ルーターのIPアドレス（環境に合わせて変更）
+ROUTER_IP = '192.168.10.1'          # ルーターのIPアドレス（環境に合わせて変更）
 DNS_SERVERS = ['8.8.8.8', '8.8.4.4']  # GoogleのDNSサーバー
 TEST_DOMAINS = ['api.slack.com', 'www.google.com']  # 疎通確認用ドメイン
 # =============================================================================
@@ -340,11 +340,39 @@ def send_with_retry(func, max_retries=3, *args, **kwargs):
             retries += 1
 
         except SlackApiError as e:
-            # Slack APIエラーはリトライしない場合もある
-            if hasattr(e, 'response') and e.response.get('error') in ['channel_not_found', 'invalid_auth']:
-                logger.error(f"Slack APIエラー (再試行しません): {e.response.get('error')}")
+            error_code = e.response.get('error') if hasattr(e, 'response') else None
+
+            # エラーコードごとに対処方法を出して即終了（リトライしても解決しないエラー）
+            if error_code == 'invalid_auth':
+                logger.error(
+                    "Slack認証エラー (invalid_auth): トークンが無効です。\n"
+                    "  → SLACK_TOKEN を確認してください: echo $SLACK_TOKEN\n"
+                    "  → Slack API (https://api.slack.com/apps) でトークンを再発行してください。"
+                )
+                return None
+            elif error_code == 'channel_not_found':
+                logger.error(
+                    f"Slackチャンネルが見つかりません (channel_not_found): '{SLACK_CHANNEL}'\n"
+                    "  → SLACK_CHANNEL の値を確認してください: echo $SLACK_CHANNEL\n"
+                    "  → チャンネル名（例: #general）またはチャンネルID（例: C012AB3CD）が正しいか確認してください。"
+                )
+                return None
+            elif error_code == 'not_in_channel':
+                logger.error(
+                    f"BotがSlackチャンネルに参加していません (not_in_channel): '{SLACK_CHANNEL}'\n"
+                    "  → Slackでチャンネルを開き、メッセージ入力欄に '/invite @ボット名' と入力して招待してください。"
+                )
+                return None
+            elif error_code == 'missing_scope':
+                logger.error(
+                    "Botに必要な権限がありません (missing_scope)。\n"
+                    "  → Slack API (https://api.slack.com/apps) の「OAuth & Permissions」→「Scopes」で\n"
+                    "    'chat:write' と 'files:write' が追加されているか確認してください。\n"
+                    "  → スコープ追加後はトークンを再発行（Reinstall App）してください。"
+                )
                 return None
 
+            # 上記以外のSlack APIエラーはリトライ
             logger.error(f"Slack APIエラー: {e} - 再試行 {retries+1}/{max_retries}")
             time.sleep(5 * (retries + 1))
             retries += 1
@@ -354,7 +382,12 @@ def send_with_retry(func, max_retries=3, *args, **kwargs):
             traceback.print_exc()
             return None
 
-    logger.error(f"最大試行回数 ({max_retries}) に達しました。操作を中止します")
+    logger.error(
+        f"Slack送信の最大試行回数 ({max_retries}回) に達しました。送信を中止します。\n"
+        "  → WiFi接続を確認: iwconfig wlan0\n"
+        "  → インターネット疎通を確認: ping -c 3 8.8.8.8\n"
+        "  → Slackサーバーへの疎通を確認: ping -c 3 api.slack.com"
+    )
 
     # 長時間接続できない場合のレポート生成
     if network_status['failures'] > 5:
@@ -436,6 +469,8 @@ def parse_args() -> argparse.Namespace:
                         help=f'ログファイルの保存先ディレクトリ（デフォルト: {SAVE_DIR}）')
     parser.add_argument('--debug', action='store_true',
                         help='デバッグモードを有効化')
+    parser.add_argument('--test-mode', action='store_true',
+                        help='テストモードを有効化（実センサー不要）')
     return parser.parse_args()
 
 def verify_slack_connection(client: WebClient) -> bool:
@@ -443,6 +478,25 @@ def verify_slack_connection(client: WebClient) -> bool:
     Slackへの接続を確認し、接続テストメッセージを送信する
     send_with_retry関数を使用して堅牢性を向上
     """
+    # SLACK_TOKEN が未設定の場合は接続できないため即終了
+    if not SLACK_TOKEN:
+        logger.error(
+            "SLACK_TOKEN が設定されていません。\n"
+            "  → 設定方法: export SLACK_TOKEN='xoxb-xxxx'\n"
+            "  → トークンは Slack API (https://api.slack.com/apps) の\n"
+            "    「OAuth & Permissions」→「Bot User OAuth Token」で確認できます。"
+        )
+        return False
+
+    # SLACK_CHANNEL が未設定の場合も送信先がないため即終了
+    if not SLACK_CHANNEL:
+        logger.error(
+            "SLACK_CHANNEL が設定されていません。\n"
+            "  → 設定方法: export SLACK_CHANNEL='#your-channel-name'\n"
+            "  → チャンネル名（#から始まる）またはチャンネルID（Cから始まる）を指定します。"
+        )
+        return False
+
     def do_auth_test():
         auth_test = client.auth_test()
         logger.info(f"Slack認証成功: {auth_test['user']}")
@@ -468,14 +522,8 @@ def verify_slack_connection(client: WebClient) -> bool:
         logger.error(f"Slack接続エラー: {e}")
         return False
 
-# --- DHT22 センサーを一度だけ初期化 ----------------------------------------
-if not TEST_MODE:
-    # Raspberry Pi 4 では use_pulseio=False が推奨
-    # という風にいわれているが、どうやらadafruit_circuitpython_dht とは相性が悪いようなので、ないほうが良い
-    dht_device = adafruit_dht.DHT22(DHT_PIN,)
-else:
-    dht_device = None                                                  # テスト用ダミー
-# ---------------------------------------------------------------------------
+# dht_device は main() 内で TEST_MODE が確定した後に初期化する
+dht_device = None
 
 def read_sensor():
     """
@@ -510,10 +558,15 @@ def read_sensor():
         logger.debug(f"DHT 取得失敗: {e}")
         return None, None
     except Exception as e:
-        # その他クリティカルな例外はセンサーをリセット
+        # その他クリティカルな例外はセンサーをリセットして再初期化
         logger.error(f"DHT 重大エラー: {e}")
-        dht_device.exit()
+        global dht_device
+        try:
+            dht_device.exit()
+        except Exception:
+            pass
         time.sleep(2)
+        dht_device = adafruit_dht.DHT22(DHT_PIN)
         return None, None
     # ----------------------------------------------------------------------
 
@@ -545,19 +598,19 @@ def check_thresholds(temperature, humidity):
         return last is None or (current - last).total_seconds() > ALERT_COOLDOWN
 
     if temperature > TEMP_MAX and ok_to_send('temp_high'):
-        alerts.append(f"警告: 温度上昇 ({temperature}°C) 以後12時間は警告を出しません。")
+        alerts.append(f"警告: 温度上昇 {temperature}°C (上限: {TEMP_MAX}°C) 以後12時間は警告を出しません。")
         alert_states['temp_high'] = current
 
     if temperature < TEMP_MIN and ok_to_send('temp_low'):
-        alerts.append(f"警告: 温度低下 ({temperature}°C) 以後12時間は警告を出しません。")
+        alerts.append(f"警告: 温度低下 {temperature}°C (下限: {TEMP_MIN}°C) 以後12時間は警告を出しません。")
         alert_states['temp_low'] = current
 
     if humidity > HUMIDITY_MAX and ok_to_send('humidity_high'):
-        alerts.append(f"警告: 湿度上昇 ({humidity}%) 以後12時間は警告を出しません。")
+        alerts.append(f"警告: 湿度上昇 {humidity}% (上限: {HUMIDITY_MAX}%) 以後12時間は警告を出しません。")
         alert_states['humidity_high'] = current
 
     if humidity < HUMIDITY_MIN and ok_to_send('humidity_low'):
-        alerts.append(f"警告: 湿度低下 ({humidity}%) add water to humidifier 以後12時間は警告を出しません。")
+        alerts.append(f"警告: 湿度低下 {humidity}% (下限: {HUMIDITY_MIN}%) 加湿器に水を補充してください。 以後12時間は警告を出しません。")
         alert_states['humidity_low'] = current
 
     return alerts
@@ -592,16 +645,22 @@ def create_graph(csv_path, output_path, start_time=None, end_time=None):
         # グラフの作成
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
 
-        # 温度のプロット（赤線）
-        ax1.plot(df['timestamp'], df['temperature'], 'r-')
+        # 温度のプロット（赤線）＋閾値ライン
+        ax1.plot(df['timestamp'], df['temperature'], 'r-', label='温度')
+        ax1.axhline(y=TEMP_MAX, color='orange', linestyle='--', alpha=0.8, label=f'上限 ({TEMP_MAX}°C)')
+        ax1.axhline(y=TEMP_MIN, color='steelblue', linestyle='--', alpha=0.8, label=f'下限 ({TEMP_MIN}°C)')
         ax1.set_title('Temperature (°C)')
         ax1.grid(True)
+        ax1.legend(loc='upper right', fontsize=8)
         ax1.set_ylim([TEMP_MIN-5, TEMP_MAX+5])  # 見やすい範囲に調整
 
-        # 湿度のプロット（青線）
-        ax2.plot(df['timestamp'], df['humidity'], 'b-')
+        # 湿度のプロット（青線）＋閾値ライン
+        ax2.plot(df['timestamp'], df['humidity'], 'b-', label='湿度')
+        ax2.axhline(y=HUMIDITY_MAX, color='orange', linestyle='--', alpha=0.8, label=f'上限 ({HUMIDITY_MAX}%)')
+        ax2.axhline(y=HUMIDITY_MIN, color='steelblue', linestyle='--', alpha=0.8, label=f'下限 ({HUMIDITY_MIN}%)')
         ax2.set_title('Humidity (%)')
         ax2.grid(True)
+        ax2.legend(loc='upper right', fontsize=8)
         ax2.set_ylim([HUMIDITY_MIN-10, HUMIDITY_MAX+10])  # 見やすい範囲に調整
 
         # レイアウトを調整して保存
@@ -718,7 +777,22 @@ def main():
         if args.debug:
             logger.setLevel(logging.DEBUG)
 
-        os.makedirs(args.save_dir, exist_ok=True)
+        # --test-mode フラグを反映
+        global TEST_MODE, dht_device
+        if args.test_mode:
+            TEST_MODE = True
+
+        # TEST_MODE が確定してからセンサーを初期化
+        if not TEST_MODE:
+            # Raspberry Pi 4 では use_pulseio=False が相性悪いため省略
+            dht_device = adafruit_dht.DHT22(DHT_PIN)
+            logger.info("DHT22センサーを初期化しました")
+        else:
+            dht_device = None
+            logger.info("テストモード: 実センサーは使用しません")
+
+        if args.save_dir:
+            os.makedirs(args.save_dir, exist_ok=True)
         csv_path = os.path.join(args.save_dir, CSV_FILENAME)
 
         # 起動時のネットワーク状態を確認
@@ -849,7 +923,7 @@ def main():
             humidity, temperature = read_sensor()
             if humidity is not None and temperature is not None:
                 save_to_csv(csv_path, humidity, temperature)
-                logger.debug(f"[{current_time.strftime('%Y-%m-%d %H:%M:%S')}] 温度: {temperature}°C, 湿度: {humidity}%")
+                logger.info(f"[{current_time.strftime('%Y-%m-%d %H:%M:%S')}] 温度: {temperature}°C, 湿度: {humidity}%")
 
                 # エラーカウントをリセット
                 error_count = 0
