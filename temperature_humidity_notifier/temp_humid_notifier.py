@@ -8,6 +8,8 @@ import traceback
 import socket
 import subprocess
 import logging
+import atexit
+import signal
 
 # .envファイルが存在すれば環境変数として読み込む（python-dotenv）
 # pip install python-dotenv でインストール可能。ファイルがなくてもエラーにならない
@@ -60,9 +62,13 @@ LONG_REPORT_INTERVAL = 1           # (日)
 CSV_FILENAME = 'temperature_log.csv'
 ALERT_COOLDOWN = 43200             # (秒)
 SAVE_DIR = '.'                     # デフォルトはカレントディレクトリ
+# 多重起動防止用PIDファイル（Linuxの/tmp以下に置く）
+PID_FILE = '/tmp/temp_humid_notifier.pid'
 
-# テストモード（--test-mode CLI引数で有効化。デフォルトはFalse）
-TEST_MODE = False
+# テストモード。以下の2通りで有効化できる:
+#   1. CLIから: python3 temp_humid_notifier.py --test-mode
+#   2. 環境変数: TEST_MODE=1（Thonnyの「Run → Configure interpreter」で設定可）
+TEST_MODE = os.environ.get('TEST_MODE', '0') == '1'
 TEST_DATA_VARIATION = True
 TEST_TEMP_BASE = 20.0
 TEST_HUMID_BASE = 50.0
@@ -469,6 +475,51 @@ def generate_network_report():
     except Exception as e:
         logger.error(f"ネットワークレポート生成中にエラー: {e}")
 
+def check_already_running():
+    """
+    多重起動チェック。既に同じスクリプトが動いていたらエラーで終了する。
+    Thonnyで止めずに再実行したとき、GPIO4が「already in use」になるのを防ぐ。
+    """
+    def remove_pid_file():
+        """終了時にPIDファイルを削除するクリーンアップ処理"""
+        try:
+            if os.path.exists(PID_FILE):
+                os.remove(PID_FILE)
+        except Exception:
+            pass
+
+    if os.path.exists(PID_FILE):
+        with open(PID_FILE) as f:
+            old_pid = f.read().strip()
+        # /proc/<PID> が存在すればプロセスはまだ生きている
+        if os.path.exists(f'/proc/{old_pid}'):
+            logger.error(
+                f"既にプロセスが動いています (PID: {old_pid})。\n"
+                f"  → Thonnyの場合: 「Stop」ボタンで前の実行を止めてから再実行してください。\n"
+                f"  → ターミナルの場合: sudo kill {old_pid}\n"
+                f"  → PIDファイル: {PID_FILE}"
+            )
+            raise SystemExit(1)
+        else:
+            # プロセスが死んでいるのにPIDファイルが残っていた（異常終了の残骸）
+            logger.warning(f"古いPIDファイルを削除します (PID: {old_pid} は既に終了済み)")
+
+    # 自分のPIDをファイルに書き込む
+    with open(PID_FILE, 'w') as f:
+        f.write(str(os.getpid()))
+
+    # 正常終了・例外・Ctrl+C どのケースでも削除されるよう登録
+    atexit.register(remove_pid_file)
+
+    # ThonnyやsystemdのSIGTERM（強制停止）にも対応
+    def handle_sigterm(sig, frame):
+        logger.info("SIGTERMを受信しました。終了処理を行います...")
+        remove_pid_file()
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='温湿度モニタリングシステム')
     parser.add_argument('--save-dir',
@@ -786,14 +837,18 @@ def main():
         if args.debug:
             logger.setLevel(logging.DEBUG)
 
-        # --test-mode フラグを反映
+        # --test-mode フラグを反映（環境変数での指定は設定パラメータ欄で既に読み込み済み）
         global TEST_MODE, dht_device
         if args.test_mode:
             TEST_MODE = True
 
+        # 多重起動チェック（GPIO「already in use」の防止）
+        check_already_running()
+
         # TEST_MODE が確定してからセンサーを初期化
         if not TEST_MODE:
-            # Raspberry Pi 4 では use_pulseio=False が相性悪いため省略
+            # use_pulseio=False はRaspberry Pi 3 + adafruit_circuitpython_dht の組み合わせで
+            # ImportError や動作不安定が報告されているため省略（デフォルトの pulseio モードを使用）
             dht_device = adafruit_dht.DHT22(DHT_PIN)
             logger.info("DHT22センサーを初期化しました")
         else:
