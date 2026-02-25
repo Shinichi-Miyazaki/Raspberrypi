@@ -2,3 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
+
+# 環境変数ファイル（トークンなどを含むためGit管理外）
+.env

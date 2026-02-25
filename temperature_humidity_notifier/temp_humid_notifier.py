@@ -5,10 +5,17 @@ import datetime
 import argparse
 import random
 import traceback
-import RPi.GPIO as GPIO
 import socket
 import subprocess
 import logging
+
+# .envファイルが存在すれば環境変数として読み込む（python-dotenv）
+# pip install python-dotenv でインストール可能。ファイルがなくてもエラーにならない
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # --- Adafruit CircuitPython DHT 用 -----------------------------------------
 import board                       # ← NEW
@@ -530,6 +537,9 @@ def read_sensor():
     (humidity, temperature) を返す。
     取得失敗時は (None, None)。
     """
+    # global宣言は関数の先頭にまとめる（Python 3.12+ではuse後のglobal宣言がSyntaxError）
+    global dht_device
+
     if TEST_MODE:
         temperature = TEST_TEMP_BASE
         humidity = TEST_HUMID_BASE
@@ -560,7 +570,6 @@ def read_sensor():
     except Exception as e:
         # その他クリティカルな例外はセンサーをリセットして再初期化
         logger.error(f"DHT 重大エラー: {e}")
-        global dht_device
         try:
             dht_device.exit()
         except Exception:
@@ -973,12 +982,6 @@ def main():
             except:
                 pass
 
-        # GPIO設定をクリーンアップ
-        try:
-            GPIO.cleanup()
-            logger.info("GPIOリソースをクリーンアップしました")
-        except:
-            pass
 
 if __name__ == "__main__":
     main()
