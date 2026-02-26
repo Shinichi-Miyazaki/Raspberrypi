@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "WebSearch",
+      "Bash(cd C:\\\\Users\\\\Shinichi\\\\PycharmProjects\\\\Raspberrypi:*)"
+    ]
+  }
+}
