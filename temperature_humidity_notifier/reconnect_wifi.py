@@ -4,13 +4,6 @@ import time
 import logging
 import os
 
-# ログ設定
-logging.basicConfig(
-    filename='/home/pi/wifi_monitor.log',
-    level=logging.INFO,
-    format='%(asctime)s - %(message)s'
-)
-
 def is_connected():
     """インターネット接続を確認する"""
     try:
@@ -54,6 +47,17 @@ def restart_wifi():
         return False
 
 def main():
+    # ログ設定は単体実行（systemdサービス）時のみ行う。
+    # モジュールとしてインポートされたときにルートロガーを乗っ取らないよう、
+    # あえて main() の中に置いている。
+    # 保存先はユーザーのホーム配下にする（/home/pi 固定だと別ユーザーで失敗するため）
+    log_path = os.path.expanduser('~/wifi_monitor.log')
+    logging.basicConfig(
+        filename=log_path,
+        level=logging.INFO,
+        format='%(asctime)s - %(message)s'
+    )
+
     check_interval = 60  # 接続確認の間隔（秒）
 
     logging.info("WiFi接続モニタリングを開始しました")
