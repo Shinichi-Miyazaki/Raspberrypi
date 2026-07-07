@@ -3,7 +3,9 @@
     "allow": [
       "Bash(git:*)",
       "WebSearch",
-      "Bash(cd C:\\\\Users\\\\Shinichi\\\\PycharmProjects\\\\Raspberrypi:*)"
+      "Bash(cd C:\\\\Users\\\\Shinichi\\\\PycharmProjects\\\\Raspberrypi:*)",
+      "PowerShell(git push *)",
+      "PowerShell(git *)"
     ]
   },
   "outputStyle": "default"
