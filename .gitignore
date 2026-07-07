@@ -5,3 +5,6 @@
 
 # 環境変数ファイル（トークンなどを含むためGit管理外）
 .env
+
+# ブログ用下書きMDファイル（リポジトリには含めない）
+temperature_humidity_notifier/blog_raspi_temp_humid.md
