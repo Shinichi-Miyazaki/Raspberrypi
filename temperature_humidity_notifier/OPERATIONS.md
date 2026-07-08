@@ -354,7 +354,36 @@ $ touch /mnt/sensor_data/test_$(hostname) && ls /mnt/sensor_data && rm /mnt/sens
 `Permission denied` や `could not resolve address` などが出たら、
 (2)のパスワードや(3)のIPアドレスの書き間違いを疑ってください。
 
+(5) データの受け口フォルダ `incoming` があることを確認する（無ければ作る）。
+**重要**: 各Piは NAS の `/mnt/sensor_data/incoming` にデータを送ります。この `incoming` フォルダは
+**あらかじめNAS上に存在している必要**があり、**無い場合は「送信先フォルダが見つかりません」という
+マウント切れとまったく同じエラー**が出てセンサーのデータが送れません（紛らわしいので要注意）。
+NAS全体で1つあれば十分なので、最初にセットアップするPiで一度だけ作成します。
+2台目以降は既にあるはずなので、下のコマンドで「あり」と出れば作成不要です:
+```
+$ ls -ld /mnt/sensor_data/incoming 2>/dev/null && echo "→ incoming あり（作成不要）" || mkdir /mnt/sensor_data/incoming
+$ ls -ld /mnt/sensor_data/incoming
+```
+最後に `drwx...` で始まる行が表示されれば成功です。
+`mkdir` が `Permission denied` で失敗する場合は、NAS側（Synologyなどの管理画面）で
+`sensor_data` 共有の直下に `incoming` フォルダを作り、sensor-uploader に書き込み権限を
+与えてください。
+
 **3-4. 新しいコードの配置**
+
+**【リポジトリの場所】について（ここで決める）**
+このあと何度も出てくる 【リポジトリの場所】 は、**このPi自身の中の、コードを置くフォルダ**です。
+以降のすべての箇所で**まったく同じパス**を使ってください。
+
+- **推奨値**: `/home/【Piのユーザー名】/Raspberrypi`
+  （例: ユーザー名が `th-meter1` なら `/home/th-meter1/Raspberrypi`）
+  この場合、実行するプログラム本体のフルパスは
+  `/home/【Piのユーザー名】/Raspberrypi/temperature_humidity_notifier/temp_humid_notifier.py` になります。
+- **NG例**: `/mnt/sensor_data/...`（NASの中）に置かないこと。
+  NASはデータの**送り先**であって、コードの置き場所ではありません。
+  NAS上にコードを置くと、NASのマウントが一時的に外れただけでプログラムが起動できなくなります
+  （`status=203/EXEC` や `No such file or directory` で落ちる）。コードは必ずPi本体の中に置きます。
+- 迷ったら、実際の値は `whoami`（ユーザー名の確認）で出た名前を 【Piのユーザー名】 に当てはめて決めます。
 
 このPiに入れるファイルは1つだけです: `temp_humid_notifier.py`（新版）。
 入手方法は、やりやすいものを1つ選ぶ:
@@ -391,6 +420,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=【Piのユーザー名】
+# lgpio は起動時に通知用ファイル(.lgd-nfy-N)をカレントディレクトリに作る。
+# 未指定だと作業ディレクトリが / になり書き込めず FileNotFoundError で落ちるため、
+# 書き込み可能なホームディレクトリを明示する
+WorkingDirectory=/home/【Piのユーザー名】
 ExecStart=/usr/bin/python3 【リポジトリの場所】/temperature_humidity_notifier/temp_humid_notifier.py \
     --device-name 246 \
     --nas-target /mnt/sensor_data/incoming \
@@ -722,6 +755,11 @@ $ journalctl -u sensor-client -n 20 --no-pager
   $ ls /mnt/sensor_data
   ```
   pingが通らないときはネットワークの問題（ルーター・LANケーブル・NASの電源を確認）
+- 「No such file or directory: '.lgd-nfy...'」（起動直後にimport段階で落ちる）→
+  サービス定義に `WorkingDirectory` が無く、作業ディレクトリが / で書き込めないのが原因。
+  `sudo systemctl edit --full sensor-client` で `[Service]` に
+  `WorkingDirectory=/home/【Piのユーザー名】` を追加し、
+  `sudo systemctl daemon-reload && sudo systemctl restart sensor-client` を実行する
 - 「unable to set line to input」→ センサー用の端子が固まっているので、リセットする:
   ```
   $ sudo systemctl stop sensor-client
