@@ -280,9 +280,15 @@ def ingest_incoming_files(conn: sqlite3.Connection, base_dir: str) -> int:
                     continue
                 timestamp_text, temperature_text, humidity_text = row
                 # 不正な行が1つでもあればファイルごと保留するのではなく、行単位でスキップする
-                parse_timestamp(timestamp_text)
-                valid_rows.append((device_id, timestamp_text,
-                                   float(temperature_text), float(humidity_text)))
+                # （Piの電源断でCSV末尾が中途半端に書かれた行などがここで弾かれる）
+                try:
+                    parse_timestamp(timestamp_text)
+                    valid_rows.append((device_id, timestamp_text,
+                                       float(temperature_text), float(humidity_text)))
+                except ValueError:
+                    logger.warning(
+                        f"不正な行をスキップしました ({os.path.basename(file_path)}): {row}"
+                    )
 
             conn.executemany(
                 "INSERT OR IGNORE INTO readings (device_id, timestamp, temperature, humidity) "

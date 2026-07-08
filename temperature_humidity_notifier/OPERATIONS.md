@@ -392,8 +392,10 @@ $ ls -ld /mnt/sensor_data/incoming
 入手方法は、やりやすいものを1つ選ぶ:
 
 - **方法A: NAS経由（おすすめ・3-3が終わっていれば使える）**
-  管理者が自分のパソコンからNASの `sensor_data` フォルダに `deploy` フォルダを作って
-  ファイルを置いておく。Piでは次を実行してコピーする:
+  管理者が自分のパソコンのブラウザからDSMのFile Station（NASのweb画面）で
+  `sensor_data` フォルダに `deploy` フォルダを作り、ファイルをアップロードしておく
+  （DSMには管理者アカウントでログインする。sensor-uploader等はDSMに入れない）。
+  Piでは次を実行してコピーする:
   ```
   $ mkdir -p 【リポジトリの場所】/temperature_humidity_notifier
   $ cp /mnt/sensor_data/deploy/temp_humid_notifier.py 【リポジトリの場所】/temperature_humidity_notifier/
