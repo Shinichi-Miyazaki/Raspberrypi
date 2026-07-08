@@ -291,14 +291,26 @@ $ systemctl status sensor-client --no-pager
 $ ps aux | grep temp_humid | grep -v grep
 ```
 - 何も表示されない → 動いていないので 3-2 へ
-- 1行以上表示された → その行の**左から2番目の数字**（プロセス番号）を使って停止:
-  ```
-  $ sudo kill 【左から2番目の数字】
-  ```
-旧プログラムをサービス登録していた場合はそれも止める（表示された場合のみ）:
+- 1行以上表示された → その行の**左から2番目の数字**（プロセス番号）を控える（例では `460`）
+
+**重要**: 旧プログラムは `myapp.service` のような**関係なさそうな名前**のサービスから
+自動起動されていることがあります。名前で探すと取り逃すため、**動いているプロセスが
+どのサービスに属しているか**を直接調べて、それを無効化します（`kill` だけだと再起動で復活します）。
+
 ```
-$ systemctl list-units --no-pager | grep -i temp
-$ sudo systemctl disable --now 【表示されたサービス名】
+$ systemctl status 【控えたプロセス番号】
+```
+表示の先頭に出るユニット名（`● 〇〇.service`）が犯人です。それを恒久停止する:
+```
+$ sudo systemctl disable --now 〇〇.service
+```
+- ユニット名が `sensor-client.service` だった場合は、それは新プログラムなので止めない
+- cgroup が `session-x.scope` や `user@1000.service` 配下だった場合は、手動起動（Thonny等）なので
+  `sudo kill 【プロセス番号】` で止める
+
+止めたあと、本当に消えたか確認する（1行も出なければOK）:
+```
+$ ps aux | grep temp_humid | grep -v grep
 ```
 
 **3-2. 不足ソフトの確認とインストール**（旧システムのソフトは使い回すので、追加は最小限）
@@ -340,11 +352,18 @@ sensor-collector のパスワードを入れてください。**
 1行目を実行 → 2行目の長い1行を実行 → nanoで【 】を書き換え:
 ```
 $ sudo mkdir -p /mnt/sensor_data
-$ grep -q sensor_data /etc/fstab || echo "//【NASのIP】/sensor_data /mnt/sensor_data cifs credentials=/etc/cifs-sensor-credentials,vers=3.0,uid=【Piのユーザー名】,iocharset=utf8,nofail,_netdev 0 0" | sudo tee -a /etc/fstab
+$ grep -q sensor_data /etc/fstab || echo "//【NASのIP】/sensor_data /mnt/sensor_data cifs credentials=/etc/cifs-sensor-credentials,vers=3.0,uid=【Piのユーザー名】,iocharset=utf8,nobrl,nofail,_netdev 0 0" | sudo tee -a /etc/fstab
 $ sudo nano /etc/fstab
 ```
 nanoで開いたら、一番下の行に今追加した設定があるので、【NASのIP】と【Piのユーザー名】が
 実際の値になっているか確認・修正して保存する。
+
+**`nobrl` について**: これはCIFS（NAS共有）上でのバイト範囲ロックを無効化するオプションです。
+コレクター役のPiは、この上のSQLiteデータベース（`db/sensor_data.sqlite3`）に書き込みます。
+CIFSはこのロックに対応しておらず（マウント表示の `nounix`）、`nobrl` が無いと
+コレクターが `database is locked` で必ず失敗します。DBに書き込むのはコレクター1台だけの
+設計なので、ロック無効化による危険はありません。センサー専用のPiには影響しないので、
+**全Piで付けておいて問題ありません**（実際に起きた不具合の対策です）。
 
 (4) 実際につないでみる:
 ```
@@ -893,6 +912,41 @@ $ systemctl status sensor-client --no-pager
 (5) 全Piを直し終えたら、NAS上に誤って置いたコードのフォルダを片付ける。
 **削除の前に必ず管理者に確認**し、正規の5フォルダ
 （`incoming` `db` `config` `reports` `logs`）と配布用の `deploy` は消さないこと。
+
+## サービスが起動しない（既にプロセスが動いています／status=217/USER）
+
+`journalctl -u sensor-client` に次が出てループしている場合の対処。
+
+- **「既にプロセスが動いています (PID: ...)」** → 旧プログラムが別サービス（`myapp.service` など
+  無関係な名前のことが多い）から二重起動され、ロックを握っています。`kill` だけでは再起動で
+  復活するので、犯人のサービスを特定して無効化します（3-1 と同じ手順）:
+  ```
+  $ ps aux | grep temp_humid | grep -v grep
+  $ systemctl status 【表示されたプロセス番号】
+  $ sudo systemctl disable --now 【先頭に出たユニット名】.service
+  $ sudo systemctl restart sensor-client
+  ```
+- **「status=217/USER」「Failed to determine user credentials」** → サービスの `User=` が
+  実在しないユーザー名（綴り違い）になっています。`whoami` で正しい名前を確認し、
+  `sudo systemctl edit --full sensor-client` で `User=` `WorkingDirectory=` `--save-dir` を
+  すべて同じ名前に揃えます（`/home/thmeter1` と `/home/th-meter1` のような食い違いが原因）。
+
+## コレクターが `database is locked` で失敗する
+
+`collector.log` や `journalctl -u collector-ingest` に `database is locked` が出る場合、
+NAS（CIFS）上のSQLiteロックが原因です。マウントに `nobrl` が付いているか確認します:
+```
+$ mount | grep sensor_data
+```
+出力に `nobrl` が**無ければ**、fstab に追加して入れ直します（コレクターPiで実行）:
+```
+$ sudo sed -i 's/,nobrl//g; s/iocharset=utf8/iocharset=utf8,nobrl/' /etc/fstab
+$ grep sensor_data /etc/fstab
+$ sudo reboot
+```
+再起動後 `mount | grep sensor_data` に `nobrl` が出ることを確認し、
+`sudo systemctl start collector-ingest` → `tail -5 /mnt/sensor_data/logs/collector.log` で
+「取り込み処理完了」が出れば復旧です（詳しい理由は 3-3 の「`nobrl` について」参照）。
 
 ## 週次レポートが届かない
 
