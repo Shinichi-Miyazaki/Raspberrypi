@@ -5,7 +5,8 @@
       "WebSearch",
       "Bash(cd C:\\\\Users\\\\Shinichi\\\\PycharmProjects\\\\Raspberrypi:*)",
       "PowerShell(git push *)",
-      "PowerShell(git *)"
+      "PowerShell(git *)",
+      "PowerShell(py *)"
     ]
   },
   "outputStyle": "default"

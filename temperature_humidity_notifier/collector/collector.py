@@ -8,11 +8,13 @@ NAS上の sensor_data 共有フォルダを読み書きし、以下の3つの処
                 温度変化率アラートと欠測アラートを判定してSlack通知
   daily         1日1回: 日次集計(min/max/avg)と、変化率閾値の統計量(μ・σ)の再計算
   weekly-report 週1回: 全デバイスのスモールマルチプルグラフを生成してSlack投稿
+  status        手動実行用: 各デバイスの最終受信時刻・件数を表示（Slack設定不要）
 
 使い方:
     python3 collector.py ingest        --base-dir /mnt/sensor_data
     python3 collector.py daily         --base-dir /mnt/sensor_data
     python3 collector.py weekly-report --base-dir /mnt/sensor_data
+    python3 collector.py status        --base-dir /mnt/sensor_data
     # --no-slack を付けるとSlackに送らずログ出力のみ（動作確認用）
 
 Slack設定は環境変数で渡す:
@@ -659,14 +661,57 @@ def run_weekly_report(base_dir: str, slack: SlackSender) -> None:
 # エントリポイント
 # =============================================================================
 
+def run_status(base_dir: str) -> None:
+    """
+    各デバイスの受信状況を画面に表示する（読み取り専用の動作確認コマンド）。
+
+    Slackには何も送らず、DBにも書き込まない。手動実行専用なので、
+    ログファイルではなく print で直接表示する。
+    """
+    now = datetime.datetime.now()
+    print(f"===== 受信状況 ({now.strftime('%Y-%m-%d %H:%M:%S')}) =====")
+
+    # DBに入っている各デバイスの最終データと件数
+    conn = open_database(base_dir)
+    try:
+        summary_rows = conn.execute(
+            "SELECT device_id, COUNT(*), MAX(timestamp) "
+            "FROM readings GROUP BY device_id ORDER BY device_id"
+        ).fetchall()
+        if not summary_rows:
+            print("データベースにデータがまだ1件もありません。")
+            print("  センサーPiの送信と、collector-ingest の実行を確認してください。")
+        for device_id, row_count, last_timestamp in summary_rows:
+            temperature, humidity = conn.execute(
+                "SELECT temperature, humidity FROM readings "
+                "WHERE device_id = ? AND timestamp = ?",
+                (device_id, last_timestamp)
+            ).fetchone()
+            elapsed_minutes = int((now - parse_timestamp(last_timestamp)).total_seconds() // 60)
+            # 欠測アラートと同じ2時間を目安に注意表示を付ける
+            warning_label = "  <-- 2時間以上データが届いていません（要確認）" if elapsed_minutes >= 120 else ""
+            print(
+                f"  {device_id}: 最終 {last_timestamp} ({elapsed_minutes}分前) "
+                f"温度 {temperature}C / 湿度 {humidity}% / 累計 {row_count}行{warning_label}"
+            )
+    finally:
+        conn.close()
+
+    # incoming に残っている未取り込みファイル数（次のingestで取り込まれる分）
+    pending_files = glob.glob(os.path.join(base_dir, 'incoming', '*', '*.csv'))
+    print(f"未取り込みファイル: {len(pending_files)}件"
+          + ("（次の collector-ingest で取り込まれます）" if pending_files else ""))
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='温湿度データコレクター')
     parser.add_argument(
         'command',
-        choices=['ingest', 'daily', 'weekly-report'],
+        choices=['ingest', 'daily', 'weekly-report', 'status'],
         help='ingest: 取り込み＋アラート判定（10分ごと） / '
              'daily: 日次集計＋閾値統計の更新（1日1回） / '
-             'weekly-report: 週次レポート送信（週1回）'
+             'weekly-report: 週次レポート送信（週1回） / '
+             'status: 各デバイスの受信状況を表示（手動確認用・Slack設定不要）'
     )
     parser.add_argument(
         '--base-dir',
@@ -694,6 +739,12 @@ def main() -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+    # status は読み取り専用の手動確認コマンド。Slack設定（環境変数）が無くても
+    # 動くように、SlackSenderの初期化より前に処理する
+    if args.command == 'status':
+        run_status(args.base_dir)
+        return
 
     setup_logging(args.base_dir, args.debug)
     slack = SlackSender(no_slack=args.no_slack)

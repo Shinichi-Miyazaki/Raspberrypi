@@ -65,6 +65,9 @@ header-includes:
 | コレクター役のPi | ___________ | 246のPi |
 | 各PiのIPアドレス | ___ / ___ / ___ / ___ | 192.168.1.21〜24 |
 
+**【リポジトリの場所】の注意**: 必ず `/home/` で始まる**Pi本体の中のパス**を記入してください。
+`/mnt/sensor_data`（NASの中）は**不可**です（理由は3-4参照。実際に起きた間違いです）。
+
 ### 全体像（何がどう動いているか）
 
 1. **センサーPi（4台）**: 10分ごとに部屋の温湿度を測定し、自分の中に記録したうえで、
@@ -440,6 +443,17 @@ EOF
 ```
 $ sudo nano /etc/systemd/system/sensor-client.service
 ```
+書き換えたら、間違いがないか次のコマンドで確認する:
+```
+$ grep -A 3 ExecStart /etc/systemd/system/sensor-client.service
+```
+確認するポイントは2つ:
+
+- 1行目のプログラムのパスが `/home/` で始まっている
+  （`/mnt/sensor_data` で始まっていたら【リポジトリの場所】の間違い。nanoで開き直して修正する）
+- `--nas-target /mnt/sensor_data/incoming` の行はこのままが**正しい**（こちらは変えない。
+  「コードはPiの中、データの送り先はNAS」という役割分担です）
+
 (3) 有効化して起動:
 ```
 $ sudo systemctl daemon-reload
@@ -541,6 +555,18 @@ $ sudo nano /etc/sensor-collector.env
 $ sudo chmod 600 /etc/sensor-collector.env
 ```
 
+書き換えるときの注意（間違えやすいポイント）:
+
+- `SLACK_CHANNEL_ID` に書くのは**チャンネル名（#sensor-notify など）ではなく**、
+  `C0` で始まるチャンネルID（フェーズ1の手順5で調べたもの）。
+  名前を書くと `channel_not_found` エラーで送信に失敗します
+- `SLACK_TOKEN` は**現在有効な**トークン（`xoxb-` で始まる）を書く。
+  漏えい等で再発行（Regenerate）した場合、**古いトークンは絶対に使わない**
+  （古いものを書くと `invalid_auth` エラーになります）
+- Botが通知チャンネルに**招待済み**であること（フェーズ1の手順4）。
+  トークンとIDが正しくても、未招待だと `not_in_channel` エラーで送信に失敗します
+- `=` の前後にスペースを入れない（`SLACK_TOKEN = xoxb-...` はNG、`SLACK_TOKEN=xoxb-...` が正しい）
+
 **4-4. 定期実行の登録**
 
 コレクターは「10分ごとの整理」「毎晩の集計」「毎週月曜のレポート」の3つの時間割で動きます。
@@ -624,6 +650,14 @@ $ sudo nano /etc/systemd/system/collector-ingest.service
 $ sudo nano /etc/systemd/system/collector-daily.service
 $ sudo nano /etc/systemd/system/collector-weekly.service
 ```
+書き換えたら、3ファイルまとめて確認する:
+```
+$ grep ExecStart /etc/systemd/system/collector-*.service
+```
+3行とも、collector.py のパスが `/home/` で始まっていればOK
+（`/mnt/sensor_data` で始まっていたら【リポジトリの場所】の間違いなので修正する）。
+行末の `--base-dir /mnt/sensor_data` はこのままが**正しい**（変えない）。
+
 最後に時間割を有効化:
 ```
 $ sudo systemctl daemon-reload
@@ -653,6 +687,13 @@ $ tail -20 /mnt/sensor_data/logs/collector.log
 ```
 ログに「取り込み完了: …」と出て、もう一度 `ls /mnt/sensor_data/incoming/246/` などを見ると
 CSVファイルが消えていれば正常（データベースに移動した、という意味）。
+
+全部屋の状況を1コマンドでまとめて見ることもできます（いつでも実行してよい安全なコマンド）:
+```
+$ python3 【リポジトリの場所】/temperature_humidity_notifier/collector/collector.py status
+```
+部屋ごとに「最終データの時刻・何分前か・最新の温湿度・累計行数」が表示されます。
+2時間以上データが届いていない部屋には「要確認」と表示されます。
 
 **5-2. 週次レポートを手動で送ってみる**
 ```
@@ -712,6 +753,30 @@ $ nano /mnt/sensor_data/config/thresholds.yaml
    ストレージの空き容量が20%以上あるか確認
 2. Snapshot Replication を開き、スナップショットが最近も取れているか確認
 
+## 通知チャンネルやトークンを変更したいとき
+
+Slackの設定を持っているのは**コレクターPiの `/etc/sensor-collector.env` の1ファイルだけ**です。
+センサーPi（残り3台）はSlackの情報を一切持っていないので、何もしなくてよいです。
+
+1. **先に**新しいチャンネルにBotを招待する: 新チャンネルで `/invite @Botの名前` と発言する
+   （これを忘れると、設定が正しくても `not_in_channel` エラーで送信に失敗します）
+2. 新チャンネルのIDを調べる: チャンネル名をクリック →「チャンネル詳細」→ 一番下の
+   `C0` で始まる文字列（フェーズ1の手順5と同じ）
+3. コレクターPiにSSH接続して設定ファイルを書き換える:
+   ```
+   $ sudo nano /etc/sensor-collector.env
+   ```
+   `SLACK_CHANNEL_ID=` の値を新しいIDに書き換えて保存する。
+   トークンを再発行した場合も同じファイルの `SLACK_TOKEN=` を書き換えるだけです
+4. **再起動やコマンドの再登録は不要**です（この設定ファイルは、コレクターが動くたびに
+   毎回読み直される仕組みのため、次の実行から自動で新しい宛先になります）。
+   すぐに確かめたい場合は手動で1回送ってみる:
+   ```
+   $ sudo systemctl start collector-weekly
+   ```
+   1分ほどで新チャンネルにグラフが届けば成功
+5. 冒頭の「設定値メモ」の【通知チャンネル名】【通知チャンネルID】も書き直しておく
+
 ## アラートの感度調整（誤報が多い・見逃しがあるとき）
 
 コレクターPiで:
@@ -769,8 +834,63 @@ $ journalctl -u sensor-client -n 20 --no-pager
 - そもそもSSHがつながらない → Piの電源アダプタを抜き、10秒待って差し直す（最終手段。
   これは安全な操作で、データは失われません）
 
+原因を詳しく調べたいときは、10分待たずにその場で1回だけ測定を試せます:
+```
+$ sudo systemctl stop sensor-client
+$ python3 【リポジトリの場所】/temperature_humidity_notifier/temp_humid_notifier.py --once --device-name 【この部屋のデバイス名】 --nas-target /mnt/sensor_data/incoming --save-dir /home/【Piのユーザー名】/sensor_logs
+$ sudo systemctl start sensor-client
+```
+「温度: …」と「NASへ…送信しました」が出れば、センサーもNAS接続も正常です。
+**最後の start（サービスを元に戻す）を忘れないこと。**
+
 **安心情報**: NASと切れていた間のデータはPi本体に貯まり続けていて、
 接続が直ると自動でまとめて送信されます。多少止まってもデータは失われません。
+
+## サービスが起動しない（status=203/EXEC・No such file or directory）
+
+`systemctl status` の表示に `status=203/EXEC` や、プログラム本体の
+`No such file or directory` が出るときは、**コードの置き場所とサービス設定のパスが
+食い違っている**のが原因です。典型例は「【リポジトリの場所】を誤ってNASの中
+（`/mnt/sensor_data/...`）にしてしまった」ケースです。次の手順で直します。
+
+(1) サービスがどこのコードを見ているか確認する:
+```
+$ grep ExecStart /etc/systemd/system/sensor-client.service /etc/systemd/system/collector-*.service 2>/dev/null
+```
+プログラムのパスが `/mnt/sensor_data` で始まる行があれば誤配置です（コレクター役以外のPiでは
+collector-* のファイルは無いのが正常で、その分のエラー表示は無視してよい）。
+
+(2) コードをPi本体（正しい【リポジトリの場所】）に置き直す:
+```
+$ mkdir -p 【リポジトリの場所】/temperature_humidity_notifier
+$ cp /mnt/sensor_data/deploy/temp_humid_notifier.py 【リポジトリの場所】/temperature_humidity_notifier/
+```
+コレクター役のPiは追加で:
+```
+$ mkdir -p 【リポジトリの場所】/temperature_humidity_notifier/collector
+$ cp /mnt/sensor_data/deploy/collector.py 【リポジトリの場所】/temperature_humidity_notifier/collector/
+```
+
+(3) サービス設定のパスを直す（該当するファイルだけをnanoで開き、ExecStart の
+プログラムのパスを `/home/...` に書き換える。**`--nas-target` や `--base-dir` の
+`/mnt/sensor_data` は正しい設定なので変えない**）:
+```
+$ sudo nano /etc/systemd/system/sensor-client.service
+```
+
+(4) 反映して動作確認:
+```
+$ sudo systemctl daemon-reload
+$ sudo systemctl restart sensor-client
+$ systemctl status sensor-client --no-pager
+```
+`active (running)` になればOK。コレクター役のPiで collector-* も直した場合は
+`sudo systemctl start collector-ingest` を実行し、
+`tail -5 /mnt/sensor_data/logs/collector.log` にエラーがないことを確認する。
+
+(5) 全Piを直し終えたら、NAS上に誤って置いたコードのフォルダを片付ける。
+**削除の前に必ず管理者に確認**し、正規の5フォルダ
+（`incoming` `db` `config` `reports` `logs`）と配布用の `deploy` は消さないこと。
 
 ## 週次レポートが届かない
 
@@ -785,7 +905,13 @@ $ sudo systemctl start collector-weekly
 
 - (2)で「そのようなファイルやディレクトリはありません」等 → `sudo mount -a` を実行して
   もう一度 `ls /mnt/sensor_data`。直らなければNASの電源・ネットワークを確認
-- (3)に「Slackファイル送信に失敗」→ トークンが失効した可能性。管理者へ連絡
+- (3)に「Slackファイル送信に失敗」→ 同じ行のエラー名で原因がわかる（下の表を参照）
+
+| ログ中のエラー名 | 原因 | 対処 |
+|---|---|---|
+| `not_in_channel` | Botがチャンネルに未招待 | チャンネルで `/invite @Botの名前` を実行 |
+| `channel_not_found` | チャンネルIDの書き間違い（名前を書いた等） | フェーズ6「通知チャンネルやトークンを変更したいとき」の手順でIDを書き直す |
+| `invalid_auth` / `token_revoked` | トークンが無効・失効（古いトークンを書いた等） | 管理者へ連絡（トークンを再発行し、同手順で書き換える） |
 
 ## Slackに何も届かなくなった（全部屋一斉）
 
