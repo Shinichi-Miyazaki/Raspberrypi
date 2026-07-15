@@ -6,7 +6,8 @@ NAS上の sensor_data 共有フォルダを読み書きし、以下の3つの処
 
   ingest        10分ごと: incoming/ のCSVをSQLiteに取り込み、
                 温度変化率アラートと欠測アラートを判定してSlack通知
-  daily         1日1回: 日次集計(min/max/avg)と、変化率閾値の統計量(μ・σ)の再計算
+  daily         1日1回: 日次集計(min/max/avg)・変化率閾値の統計量(μ・σ)の再計算と、
+                前日サマリのSlack投稿
   weekly-report 週1回: 全デバイスのスモールマルチプルグラフを生成してSlack投稿
   status        手動実行用: 各デバイスの最終受信時刻・件数を表示（Slack設定不要）
 
@@ -491,6 +492,34 @@ def compute_rate_statistics(conn: sqlite3.Connection, device_id: str,
     return statistics.mean(absolute_rates), statistics.stdev(absolute_rates), len(absolute_rates)
 
 
+def build_daily_comment(conn: sqlite3.Connection, all_device_ids: list,
+                        target_date: datetime.date) -> str:
+    """
+    日次レポートに使うコメント（前日の各デバイスのmin/max/avgと欠測注記）を作る。
+
+    週次レポートの build_weekly_comment と書式をそろえている。
+    前日の集計行が無いデバイスは「データなし（要確認）」と明記し、欠測に気づけるようにする。
+    """
+    date_key = target_date.strftime('%Y-%m-%d')
+    lines = [f":bar_chart: 日次レポート ({target_date:%m/%d})"]
+
+    for device_id in all_device_ids:
+        row = conn.execute(
+            "SELECT temp_min, temp_max, ROUND(temp_avg, 1), "
+            "       humid_min, humid_max, ROUND(humid_avg, 1) "
+            "FROM daily_summary WHERE device_id = ? AND date = ?",
+            (device_id, date_key),
+        ).fetchone()
+        if row is None or row[0] is None:
+            lines.append(f"- {device_id}: 前日のデータなし（要確認）")
+            continue
+        lines.append(
+            f"- {device_id}: 温度 {row[0]}〜{row[1]}°C (平均 {row[2]}°C), "
+            f"湿度 {row[3]}〜{row[4]}% (平均 {row[5]}%)"
+        )
+    return "\n".join(lines)
+
+
 def run_daily(base_dir: str, slack: SlackSender) -> None:
     """daily サブコマンド本体"""
     conn = open_database(base_dir)
@@ -501,9 +530,12 @@ def run_daily(base_dir: str, slack: SlackSender) -> None:
         update_daily_summary(conn)
         logger.info("日次集計を更新しました")
 
+        # 以降の統計更新・レポートで同じデバイス一覧を使い回す
+        device_ids = get_all_device_ids(conn)
+
         # デバイスごとにμ・σを再計算してthresholds.yamlを更新する。
         # k や cooldown などの手動設定値はそのまま残し、統計量だけを書き換える
-        for device_id in get_all_device_ids(conn):
+        for device_id in device_ids:
             mu, sigma, sample_count = compute_rate_statistics(conn, device_id, now)
             device_settings = config['devices'].setdefault(device_id, {})
             if mu is None:
@@ -519,6 +551,14 @@ def run_daily(base_dir: str, slack: SlackSender) -> None:
             logger.info(f"{device_id}: μ={mu:.5f}, σ={sigma:.5f} (n={sample_count}) に更新")
 
         save_config(base_dir, config)
+
+        # 前日サマリをSlackに投稿する（毎日03:30の実行時に届く）。
+        # 集計・統計の保存が終わった後に送るため、Slack障害があっても
+        # 日次集計とμ・σ更新は失われない
+        if device_ids:
+            target_date = (now - datetime.timedelta(days=1)).date()
+            if slack.post_message(build_daily_comment(conn, device_ids, target_date)):
+                logger.info("日次レポートを送信しました")
     finally:
         conn.close()
 
@@ -715,7 +755,7 @@ def parse_args() -> argparse.Namespace:
         'command',
         choices=['ingest', 'daily', 'weekly-report', 'status'],
         help='ingest: 取り込み＋アラート判定（10分ごと） / '
-             'daily: 日次集計＋閾値統計の更新（1日1回） / '
+             'daily: 日次集計＋閾値統計の更新＋前日サマリ投稿（1日1回） / '
              'weekly-report: 週次レポート送信（週1回） / '
              'status: 各デバイスの受信状況を表示（手動確認用・Slack設定不要）'
     )

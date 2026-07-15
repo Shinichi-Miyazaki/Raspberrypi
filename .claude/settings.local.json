@@ -6,7 +6,8 @@
       "Bash(cd C:\\\\Users\\\\Shinichi\\\\PycharmProjects\\\\Raspberrypi:*)",
       "PowerShell(git push *)",
       "PowerShell(git *)",
-      "PowerShell(py *)"
+      "PowerShell(py *)",
+      "Bash(python -c \"import yaml; print\\('pyyaml OK'\\)\")"
     ]
   },
   "outputStyle": "default"
