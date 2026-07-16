@@ -5,8 +5,8 @@ NAS上の sensor_data 共有フォルダを読み書きし、以下の3つの処
 それぞれ systemd timer（または cron）で定期実行する想定。
 
   ingest        10分ごと: incoming/ のCSVをSQLiteに取り込み、
-                温度変化率アラートと欠測アラートを判定してSlack通知
-  daily         1日1回: 日次集計(min/max/avg)・変化率閾値の統計量(μ・σ)の再計算と、
+                範囲逸脱アラート（温湿度が2連続で許容範囲外）と欠測アラートを判定してSlack通知
+  daily         1日1回: 日次集計(min/max/avg)の再計算と、
                 前日サマリのSlack投稿
   weekly-report 週1回: 全デバイスのスモールマルチプルグラフを生成してSlack投稿
   status        手動実行用: 各デバイスの最終受信時刻・件数を表示（Slack設定不要）
@@ -25,7 +25,7 @@ Slack設定は環境変数で渡す:
 NAS上のフォルダ構成（--base-dir 以下）:
     incoming/<デバイス名>/   各Piから届いたCSVチャンク（取り込み後に削除）
     db/sensor_data.sqlite3   全デバイス共通のデータベース
-    config/thresholds.yaml   デバイスごとの閾値設定・統計量
+    config/thresholds.yaml   デバイスごとの許容範囲・アラート設定
     reports/weekly/          週次レポート画像のアーカイブ（月別）
     logs/collector.log       このプログラムのログ
 """
@@ -37,7 +37,6 @@ import glob
 import logging
 import os
 import sqlite3
-import statistics
 import sys
 import traceback
 
@@ -49,23 +48,19 @@ DB_RELATIVE_PATH = os.path.join('db', 'sensor_data.sqlite3')
 CONFIG_RELATIVE_PATH = os.path.join('config', 'thresholds.yaml')
 LOG_RELATIVE_PATH = os.path.join('logs', 'collector.log')
 
-# 変化率の計算で、測定間隔がこれより空いたペアは判定に使わない
-# （Pi再起動・欠測をまたぐペアは変化率が不正確になり誤報の元になるため）
+# 範囲逸脱判定で、測定間隔がこれより空いたペアは「2連続」とみなさない
+# （Pi再起動・欠測をまたぐと、離れた2点をたまたま拾って誤報する恐れがあるため）
 MAX_PAIR_GAP_MINUTES = 30
 
-# 変化率アラートは最新データがこの時間より古い場合は判定しない
+# 範囲逸脱アラートは最新データがこの時間より古い場合は判定しない
 # （ingestは10分ごとに走るため、同じ古いペアを繰り返し判定するのを防ぐ）
-RATE_ALERT_FRESHNESS_MINUTES = 30
-
-# μ・σの再計算に使う過去データの日数と、計算に必要な最小ペア数
-STATS_WINDOW_DAYS = 30
-STATS_MIN_SAMPLES = 50
+ALERT_FRESHNESS_MINUTES = 30
 
 # thresholds.yaml に設定が無いときに使うデフォルト値
 DEFAULT_SETTINGS = {
-    'k': 3.0,                    # 閾値 θ = μ + k・σ の係数。誤報/見逃しに応じて手動調整する
-    'alert_cooldown_hours': 6,   # 同じデバイスの変化率アラートの再送抑制時間
-    'baseline_days': 7,          # 運用開始からこの日数はアラートを出さない（μ・σの助走期間）
+    'temp_range': None,          # 温度の許容範囲 [下限, 上限]（°C）。None なら温度は判定しない
+    'humid_range': None,         # 湿度の許容範囲 [下限, 上限]（%）。None なら湿度は判定しない
+    'alert_cooldown_hours': 6,   # 同じデバイス・同じ項目のアラートの再送抑制時間
     'missing_data_hours': 2,     # データがこの時間止まったら欠測アラート
 }
 
@@ -117,7 +112,7 @@ def open_database(base_dir: str) -> sqlite3.Connection:
         );
         CREATE TABLE IF NOT EXISTS alert_state (
             device_id TEXT NOT NULL,
-            alert_key TEXT NOT NULL,     -- 'rate'（変化率）または 'missing'（欠測）
+            alert_key TEXT NOT NULL,     -- 'temp_range'/'humid_range'（範囲逸脱）または 'missing'（欠測）
             last_sent TEXT NOT NULL,
             PRIMARY KEY (device_id, alert_key)
         );
@@ -137,17 +132,6 @@ def load_config(base_dir: str) -> dict:
     config.setdefault('defaults', {})
     config.setdefault('devices', {})
     return config
-
-
-def save_config(base_dir: str, config: dict) -> None:
-    """thresholds.yaml を保存する（一時ファイル経由のアトミック置換）"""
-    import yaml
-    config_path = os.path.join(base_dir, CONFIG_RELATIVE_PATH)
-    os.makedirs(os.path.dirname(config_path), exist_ok=True)
-    temp_path = config_path + '.tmp'
-    with open(temp_path, 'w', encoding='utf-8') as f:
-        yaml.safe_dump(config, f, allow_unicode=True, sort_keys=False)
-    os.replace(temp_path, config_path)
 
 
 def get_setting(config: dict, device_id: str, key: str):
@@ -318,18 +302,19 @@ def get_all_device_ids(conn: sqlite3.Connection) -> list:
         "SELECT DISTINCT device_id FROM readings ORDER BY device_id")]
 
 
-def check_rate_alerts(conn: sqlite3.Connection, config: dict, slack: SlackSender,
-                      now: datetime.datetime) -> None:
+def check_range_alerts(conn: sqlite3.Connection, config: dict, slack: SlackSender,
+                       now: datetime.datetime) -> None:
     """
-    温度変化率アラートの判定。
+    範囲逸脱アラートの判定。
 
-    デバイスごとに直近2点の測定から ΔT/Δt（°C/分）を計算し、
-    |ΔT/Δt| > θ（θ = μ + k・σ）ならSlackに通知する。
-    μ・σは daily 処理が thresholds.yaml に書き込んだ統計量を使う。
+    デバイスごとに直近2点を見て、温度・湿度が「許容範囲」の同じ側に2回連続で
+    逸脱していたらSlackに通知する。2連続を条件にすることで、DHT22の単発ノイズや
+    短時間のドア開閉では鳴らず、インキュベータの開けっ放しのような継続的な逸脱だけを捉える。
+    許容範囲（temp_range / humid_range）が未設定の項目は判定しない。
     """
     for device_id in get_all_device_ids(conn):
         rows = conn.execute(
-            "SELECT timestamp, temperature FROM readings "
+            "SELECT timestamp, temperature, humidity FROM readings "
             "WHERE device_id = ? ORDER BY timestamp DESC LIMIT 2",
             (device_id,),
         ).fetchall()
@@ -340,53 +325,65 @@ def check_rate_alerts(conn: sqlite3.Connection, config: dict, slack: SlackSender
         older_time = parse_timestamp(rows[1][0])
 
         # 古いデータしか無い場合は判定しない（同じペアを繰り返し判定しないため）
-        if (now - newest_time).total_seconds() > RATE_ALERT_FRESHNESS_MINUTES * 60:
+        if (now - newest_time).total_seconds() > ALERT_FRESHNESS_MINUTES * 60:
             continue
 
-        # 測定間隔が空きすぎたペアは変化率が不正確なので判定しない
+        # 測定間隔が空きすぎたペアは「2連続」とみなさない
+        # （欠測明けの1点目や、離れた2点をたまたま拾って誤報するのを防ぐ）
         gap_minutes = (newest_time - older_time).total_seconds() / 60
         if not (0 < gap_minutes <= MAX_PAIR_GAP_MINUTES):
             continue
 
-        # ベースライン期間中（初データから baseline_days 日以内）は記録のみで発報しない
-        first_row = conn.execute(
-            "SELECT MIN(timestamp) FROM readings WHERE device_id = ?", (device_id,)
-        ).fetchone()
-        baseline_days = get_setting(config, device_id, 'baseline_days')
-        if (now - parse_timestamp(first_row[0])).days < baseline_days:
-            logger.debug(f"{device_id}: ベースライン期間中のためアラート判定をスキップ")
-            continue
+        # 温度・湿度それぞれで、2連続の範囲逸脱を判定する
+        # rows[0] が最新、rows[1] が1つ前。列は (timestamp, temperature, humidity)
+        _check_one_range(conn, config, slack, now, device_id,
+                         setting_key='temp_range', label='温度', unit='°C',
+                         newest_value=rows[0][1], older_value=rows[1][1])
+        _check_one_range(conn, config, slack, now, device_id,
+                         setting_key='humid_range', label='湿度', unit='%',
+                         newest_value=rows[0][2], older_value=rows[1][2])
 
-        # μ・σが未計算（daily がまだ動いていない）なら判定できない
-        device_settings = config['devices'].get(device_id) or {}
-        mu = device_settings.get('mu')
-        sigma = device_settings.get('sigma')
-        if mu is None or sigma is None:
-            logger.debug(f"{device_id}: μ・σが未計算のためアラート判定をスキップ")
-            continue
 
-        rate = (rows[0][1] - rows[1][1]) / gap_minutes  # °C/分
-        k = get_setting(config, device_id, 'k')
-        threshold = mu + k * sigma
+def _check_one_range(conn: sqlite3.Connection, config: dict, slack: SlackSender,
+                     now: datetime.datetime, device_id: str, setting_key: str,
+                     label: str, unit: str,
+                     newest_value: float, older_value: float) -> None:
+    """
+    1項目（温度または湿度）の範囲逸脱を判定してアラートを送る。
 
-        if abs(rate) <= threshold:
-            continue
+    直近2点が「両方とも下限未満」または「両方とも上限超過」のときだけ発報する。
+    片側だけの逸脱（単発ノイズの疑い）や範囲内では通知しない。
+    """
+    allowed = get_setting(config, device_id, setting_key)
+    if not allowed:  # 未設定（None）なら判定しない
+        return
+    low, high = allowed[0], allowed[1]
 
-        cooldown_hours = get_setting(config, device_id, 'alert_cooldown_hours')
-        if not is_cooldown_passed(conn, device_id, 'rate', cooldown_hours, now):
-            logger.info(f"{device_id}: 変化率超過を検出しましたがクールダウン中のため送信しません")
-            continue
+    # 2点とも同じ側に逸脱しているときだけ発報する
+    if newest_value < low and older_value < low:
+        direction = "低すぎます"
+    elif newest_value > high and older_value > high:
+        direction = "高すぎます"
+    else:
+        return
 
-        direction = "上昇" if rate > 0 else "下降"
-        message = (
-            f":rotating_light: [{device_id}] 温度が急{direction}しています\n"
-            f"変化率: {rate:+.3f}°C/分（閾値: ±{threshold:.3f}°C/分, k={k}）\n"
-            f"直近の測定: {rows[1][1]}°C ({older_time:%H:%M}) → {rows[0][1]}°C ({newest_time:%H:%M})\n"
-            f"以後{cooldown_hours}時間はこのデバイスの変化率アラートを送信しません"
+    cooldown_hours = get_setting(config, device_id, 'alert_cooldown_hours')
+    if not is_cooldown_passed(conn, device_id, setting_key, cooldown_hours, now):
+        logger.info(f"{device_id}: {label}の範囲逸脱を検出しましたがクールダウン中のため送信しません")
+        return
+
+    message = (
+        f":rotating_light: [{device_id}] {label}が{direction}（インキュベータの開けっ放し等に注意）\n"
+        f"直近2回の{label}: {older_value}{unit} → {newest_value}{unit}"
+        f"（許容範囲: {low}〜{high}{unit}）\n"
+        f"以後{cooldown_hours}時間はこのデバイスの{label}アラートを送信しません"
+    )
+    if slack.post_message(message):
+        record_alert_sent(conn, device_id, setting_key, now)
+        logger.info(
+            f"{device_id}: {label}範囲逸脱アラートを送信しました "
+            f"({newest_value}{unit}, 許容 {low}〜{high}{unit})"
         )
-        if slack.post_message(message):
-            record_alert_sent(conn, device_id, 'rate', now)
-            logger.info(f"{device_id}: 変化率アラートを送信しました (rate={rate:+.3f}°C/分)")
 
 
 def check_missing_data_alerts(conn: sqlite3.Connection, config: dict, slack: SlackSender,
@@ -434,14 +431,14 @@ def run_ingest(base_dir: str, slack: SlackSender) -> None:
         inserted = ingest_incoming_files(conn, base_dir)
         logger.info(f"取り込み処理完了: {inserted}行")
 
-        check_rate_alerts(conn, config, slack, now)
+        check_range_alerts(conn, config, slack, now)
         check_missing_data_alerts(conn, config, slack, now)
     finally:
         conn.close()
 
 
 # =============================================================================
-# daily: 日次集計と統計量の再計算
+# daily: 日次集計と前日サマリ投稿
 # =============================================================================
 
 def update_daily_summary(conn: sqlite3.Connection) -> None:
@@ -463,33 +460,6 @@ def update_daily_summary(conn: sqlite3.Connection) -> None:
         GROUP BY device_id, date(timestamp)
     """)
     conn.commit()
-
-
-def compute_rate_statistics(conn: sqlite3.Connection, device_id: str,
-                            now: datetime.datetime) -> tuple:
-    """
-    過去 STATS_WINDOW_DAYS 日の測定から |ΔT/Δt| の平均μと標準偏差σを計算する。
-
-    Returns:
-        (mu, sigma, サンプル数)。サンプル数が不足していれば (None, None, 数)
-    """
-    window_start = (now - datetime.timedelta(days=STATS_WINDOW_DAYS)).strftime('%Y-%m-%d %H:%M:%S')
-    rows = conn.execute(
-        "SELECT timestamp, temperature FROM readings "
-        "WHERE device_id = ? AND timestamp >= ? ORDER BY timestamp",
-        (device_id, window_start),
-    ).fetchall()
-
-    absolute_rates = []
-    for (time1, temp1), (time2, temp2) in zip(rows, rows[1:]):
-        gap_minutes = (parse_timestamp(time2) - parse_timestamp(time1)).total_seconds() / 60
-        if 0 < gap_minutes <= MAX_PAIR_GAP_MINUTES:
-            absolute_rates.append(abs((temp2 - temp1) / gap_minutes))
-
-    if len(absolute_rates) < STATS_MIN_SAMPLES:
-        return None, None, len(absolute_rates)
-
-    return statistics.mean(absolute_rates), statistics.stdev(absolute_rates), len(absolute_rates)
 
 
 def build_daily_comment(conn: sqlite3.Connection, all_device_ids: list,
@@ -524,37 +494,15 @@ def run_daily(base_dir: str, slack: SlackSender) -> None:
     """daily サブコマンド本体"""
     conn = open_database(base_dir)
     try:
-        config = load_config(base_dir)
         now = datetime.datetime.now()
 
         update_daily_summary(conn)
         logger.info("日次集計を更新しました")
 
-        # 以降の統計更新・レポートで同じデバイス一覧を使い回す
         device_ids = get_all_device_ids(conn)
 
-        # デバイスごとにμ・σを再計算してthresholds.yamlを更新する。
-        # k や cooldown などの手動設定値はそのまま残し、統計量だけを書き換える
-        for device_id in device_ids:
-            mu, sigma, sample_count = compute_rate_statistics(conn, device_id, now)
-            device_settings = config['devices'].setdefault(device_id, {})
-            if mu is None:
-                logger.warning(
-                    f"{device_id}: 変化率のサンプル数が不足しています "
-                    f"({sample_count}/{STATS_MIN_SAMPLES})。μ・σは更新しません"
-                )
-                continue
-            device_settings['mu'] = round(mu, 5)
-            device_settings['sigma'] = round(sigma, 5)
-            device_settings['stats_updated'] = now.strftime('%Y-%m-%d')
-            device_settings['stats_samples'] = sample_count
-            logger.info(f"{device_id}: μ={mu:.5f}, σ={sigma:.5f} (n={sample_count}) に更新")
-
-        save_config(base_dir, config)
-
         # 前日サマリをSlackに投稿する（毎日03:30の実行時に届く）。
-        # 集計・統計の保存が終わった後に送るため、Slack障害があっても
-        # 日次集計とμ・σ更新は失われない
+        # 集計の保存が終わった後に送るため、Slack障害があっても日次集計は失われない
         if device_ids:
             target_date = (now - datetime.timedelta(days=1)).date()
             if slack.post_message(build_daily_comment(conn, device_ids, target_date)):
@@ -755,7 +703,7 @@ def parse_args() -> argparse.Namespace:
         'command',
         choices=['ingest', 'daily', 'weekly-report', 'status'],
         help='ingest: 取り込み＋アラート判定（10分ごと） / '
-             'daily: 日次集計＋閾値統計の更新＋前日サマリ投稿（1日1回） / '
+             'daily: 日次集計＋前日サマリ投稿（1日1回） / '
              'weekly-report: 週次レポート送信（週1回） / '
              'status: 各デバイスの受信状況を表示（手動確認用・Slack設定不要）'
     )

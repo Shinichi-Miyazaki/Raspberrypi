@@ -226,3 +226,101 @@ sudo systemctl start collector-weekly
 - [ ] 4台すべてでリトライ版に更新し、`systemctl status sensor-client` が active (running)
 - [ ] `systemctl list-timers | grep collector` で3行表示される
 - [ ] 手動実行でSlackに週次グラフが届いた
+
+---
+
+## 作業4: アラートを「範囲逸脱（2連続）」方式に切り替え（コレクター役のPiだけ）
+
+**変えること**: これまでの「温度が急に変わったら鳴る」方式をやめ、
+「温度・湿度が決めた**許容範囲**を**2回連続**で外れたら鳴る」方式にする。
+インキュベータ（培養器）の開けっ放しのような、じわじわ続く逸脱を捉えるのが目的。
+
+**うれしい点**:
+
+- コレクター役のPi1台だけの作業。センサーPi3台は何もしなくてよい
+- コード差し替え後の**再起動は不要**。次の10分ごとの整理（ingest）から自動で新方式になる
+- 学習のための待ち時間（旧方式のベースライン1週間）は無く、範囲を設定した直後から有効
+
+### 4-1. 新しいコードをPiに入れる
+
+(1) 開発機（このWindows PC）から、更新した2ファイルをNASの deploy へアップロードする
+（作業2と同じ手順。DSMのFile Station → `sensor_data` → `deploy` に上書きアップロード）:
+
+- `C:\Users\Shinichi\PycharmProjects\Raspberrypi\temperature_humidity_notifier\collector\collector.py`
+- `C:\Users\Shinichi\PycharmProjects\Raspberrypi\temperature_humidity_notifier\collector\thresholds.example.yaml`
+
+(2) コレクター役のPiで、deploy から実体をコピーする:
+
+```
+cp /mnt/sensor_data/deploy/collector.py ~/Raspberrypi/temperature_humidity_notifier/collector/
+cp /mnt/sensor_data/deploy/thresholds.example.yaml ~/Raspberrypi/temperature_humidity_notifier/collector/
+```
+
+### 4-2. 許容範囲を設定する（いちばん大事な作業）
+
+NAS上の設定ファイルを開く:
+
+```
+nano /mnt/sensor_data/config/thresholds.yaml
+```
+
+`devices:` の下を、部屋ごとに `temp_range: [下限, 上限]` の形にする（数字と部屋番号は実際の値に）:
+
+```
+devices:
+  "246":
+    temp_range: [20, 28]
+  "247":
+    temp_range: [18, 25]
+  "248":
+    temp_range: [20, 28]
+  "249":
+    temp_range: [20, 28]
+```
+
+- 範囲は「普段の設定温度の少し外側」にするのがコツ（狭すぎると誤報が増える）
+- 湿度も監視したい部屋には `humid_range: [30, 70]` の行を足す（不要な部屋は書かない＝湿度は判定されない）
+- 古い `k:` `mu:` `sigma:` `baseline_days:` の行が残っていても**害はない**（新方式では無視される）。気になれば消してよい
+- 保存: Ctrl+O → Enter、終了: Ctrl+X
+
+### 4-3. 反映の確認（再起動は不要）
+
+手動で1回、整理を動かしてエラーが無いか見る:
+
+```
+sudo systemctl start collector-ingest
+tail -20 /mnt/sensor_data/logs/collector.log
+```
+
+「取り込み処理完了」が出て、赤いエラー（`ERROR` / `Traceback`）が無ければ成功。
+続けて全部屋の受信状況を一覧で確認:
+
+```
+python3 ~/Raspberrypi/temperature_humidity_notifier/collector/collector.py status
+```
+
+### 4-4.（任意）アラートが鳴るかテスト
+
+どれか1部屋の `temp_range` を、今の室温を確実に外す狭い範囲（例 `[0, 1]`）に一時変更して保存する:
+
+```
+nano /mnt/sensor_data/config/thresholds.yaml
+```
+
+範囲逸脱は「2回連続で範囲外」で初めて鳴るので、少し間をあけて整理を**2回**動かす:
+
+```
+sudo systemctl start collector-ingest
+（10分ほど待って、新しい測定が1つ増えてから）
+sudo systemctl start collector-ingest
+```
+
+Slackに「温度が低すぎます（インキュベータの開けっ放し等に注意）」が届けば成功。
+**確認後、必ず `temp_range` を元の値に戻して保存する**（戻し忘れると鳴りっぱなしになる）。
+
+### 完了条件
+
+- [ ] コレクター役のPiに新しい `collector.py` をコピーした
+- [ ] `thresholds.yaml` の各部屋に `temp_range`（必要なら `humid_range`）を設定した
+- [ ] `collector-ingest` を手動実行してもログにエラーが出ない
+- [ ] （テストした場合）`temp_range` を元の値に戻した
