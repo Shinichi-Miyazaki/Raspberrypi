@@ -6,6 +6,7 @@
 「毎日の前日サマリ」「週1回の統合グラフ」「範囲逸脱アラート」「欠測アラート」に絞られています。
 
 **セットアップ・日常運用の手順は [OPERATIONS.md](OPERATIONS.md) を参照してください。**
+Piを新品から構築する場合は、その前に [SETUP_PI.md](SETUP_PI.md) を実施します。
 本ファイルは仕組みの説明と開発者向け情報をまとめたものです。
 
 ## システム構成
@@ -71,9 +72,12 @@ NAS上の `sensor_data/` の構成:
 | `collector/collector.py` | コレクターPi（1台） | 取り込み・アラート判定・日次集計・週次レポート |
 | `collector/thresholds.example.yaml` | →NASにコピー | 許容範囲・アラート設定の雛形 |
 | `gpio_reset.py` | センサーPi | GPIOが解放されないときの復旧用 |
+| `SETUP_PI.md` | - | Raspberry Pi 初期構築手順書（microSD作成〜SSH〜配線） |
 | `OPERATIONS.md` | - | セットアップ・運用手順書（初心者向け） |
 
 旧バージョン（単一デバイス・Slack直接通知版）は `../Legacy/temp_humid_notifier.py` にあります。
+旧セットアップ手順は `../Legacy/temperature_notifier_network.md` にありますが、
+センサーPiにSlackトークンを直接持たせる旧構成の記述を含むため、参考程度に留めてください。
 
 ## 必要な機材（1デバイスあたり）
 - Raspberry Pi（3B+または4を推奨）
@@ -131,9 +135,31 @@ adafruit_circuitpython_dhtでは `use_pulseio=False` の設定が相性が悪い
 「unable to set line XX to input」エラーが起こることがある。
 `sudo python3 gpio_reset.py` で復旧できる。
 
-### Wifiの接続が切れる問題
-`reconnect_wifi.py`（Legacy側）をsystemdサービスとして常駐させることで対応済み。
-設定方法はOPERATIONS.mdのセンサーPi設定を参照。
+### 状態確認に使うコマンド
+原因を切り分けるときに使うもの。運用担当者向けの対処手順は
+OPERATIONS.md のフェーズ7にあるので、まずそちらを参照する。
+
+```bash
+# GPIO4が掴まれたままになっていないか
+ls /sys/class/gpio/gpio4/ 2>/dev/null && echo "GPIO4使用中" || echo "GPIO4未使用"
+
+# GPIO4を使っているプロセスを特定する
+sudo fuser /dev/gpiomem
+lsof /dev/gpiomem
+
+# /dev/gpiomem へのアクセス権限
+ls -la /dev/gpiomem
+
+# 多重起動していないか（旧プログラムが別サービスから起動されていることがある）
+ps aux | grep temp_humid | grep -v grep
+cat /tmp/temp_humid_notifier.pid
+
+# pigpiod を使っている場合の動作確認
+sudo systemctl status pigpiod
+
+# 動作ログ
+journalctl -u sensor-client -n 50 --no-pager
+```
 
 ## 参考資料
 - ハードウェア・配線: SunFounder DHT11センサー解説（https://docs.sunfounder.com/projects/umsk/ja/latest/05_raspberry_pi/pi_lesson19_dht11.html）
