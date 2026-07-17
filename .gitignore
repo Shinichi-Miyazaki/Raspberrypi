@@ -1,10 +1,22 @@
+# 環境変数ファイル（トークンなどを含むためGit管理外）
+.env
+
+# IDE設定（PyCharmが自動生成する個人設定。環境ごとに異なるため共有しない）
+.idea/
+
+# Pythonのキャッシュ（実行時に自動生成される）
+__pycache__/
+*.pyc
+
+# 実行ログ（プログラムが実行時に生成する記録。コードではないため管理外）
+*.log
+
+# R関連（このリポジトリでは使用していないが、誤って混入するのを防ぐ）
 .Rproj.user
 .Rhistory
 .RData
 .Ruserdata
-
-# 環境変数ファイル（トークンなどを含むためGit管理外）
-.env
+*.Rproj
 
 # ブログ用下書きMDファイル（リポジトリには含めない）
 temperature_humidity_notifier/blog_raspi_temp_humid.md

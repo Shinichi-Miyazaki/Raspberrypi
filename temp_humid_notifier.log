@@ -1,5 +1,0 @@
-2026-07-08 21:02:00,550 - INFO - CSVファイルを作成しました: C:\Users\Shinichi\AppData\Local\Temp\sensor_save__4pf0n9a\temperature_log.csv
-2026-07-08 21:02:00,551 - INFO - テストモードでセンサー監視を開始します (version 2026-07-09) [デバイス名: test246, 送信先: C:\Users\Shinichi\AppData\Local\Temp\fake_nas_ba8_vegm\incoming]
-2026-07-08 21:02:00,582 - INFO - [2026-07-08 21:02:00] 温度: 19.54°C, 湿度: 51.311%
-2026-07-08 21:02:00,646 - INFO - NASへ1行を送信しました: test246_20260708_210200_586383.csv
-2026-07-08 21:02:00,647 - INFO - --once 指定のため、1回の測定・送信で終了します
