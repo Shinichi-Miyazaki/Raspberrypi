@@ -268,6 +268,30 @@ $ python3 -c "import adafruit_dht; import board; print(adafruit_dht.DHT22(board.
   もう一度実行してみて、数字が出れば問題ありません
 - 何度やってもエラー → 配線を確認してください（末尾「失敗3」参照）
 
+## Wi-Fiの省電力を切る（必ず実施）
+
+Raspberry Pi の無線は、通信が無いあいだ電力を絞る「省電力」が既定で有効です。
+これがNASとの接続（CIFS）と相性が悪く、**接続だけが死んだまま復帰せず、データが
+38時間止まった事故**が実際に起きています。構築時に切っておきます。
+
+```
+$ iwconfig wlan0 | grep -i power
+```
+
+`Power Management:off` なら対応済みなので何もしなくてよい。`on` なら切ります:
+
+```
+$ nmcli -t -f NAME connection show --active
+$ sudo nmcli connection modify "【上で出た接続名】" wifi.powersave 2
+$ sudo nmcli connection up "【上で出た接続名】"
+$ iwconfig wlan0 | grep -i power
+```
+
+最後の行が `Power Management:off` になれば完了です（`2` は「省電力を使わない」の意味）。
+
+`nmcli` が見つからないと言われた場合は古いOS構成です。
+OPERATIONS.md のフェーズ3「3-7. Wi-Fiの省電力を切る」に代わりの手順があります。
+
 ---
 
 # 6. 完了確認
@@ -281,6 +305,7 @@ $ python3 -c "import adafruit_dht; import board; print(adafruit_dht.DHT22(board.
 - [ ] ルーターでそのIPアドレスを固定した
 - [ ] `cifs-utils` と `adafruit-circuitpython-dht` を入れた
 - [ ] 動作確認コマンドで温度の数字が表示された
+- [ ] `iwconfig wlan0 | grep -i power` が `Power Management:off`
 
 **次にやること**: [OPERATIONS.md](OPERATIONS.md) のフェーズ1（Slackの準備）へ進んでください。
 Piを4台とも構築する場合は、先に4台ともこの手順書を終わらせてから

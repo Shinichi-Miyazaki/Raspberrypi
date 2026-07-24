@@ -358,11 +358,24 @@ sensor-collector のパスワードを入れてください。**
 1行目を実行 → 2行目の長い1行を実行 → nanoで【 】を書き換え:
 ```
 $ sudo mkdir -p /mnt/sensor_data
-$ grep -q sensor_data /etc/fstab || echo "//【NASのIP】/sensor_data /mnt/sensor_data cifs credentials=/etc/cifs-sensor-credentials,vers=3.0,uid=【Piのユーザー名】,iocharset=utf8,nobrl,nofail,_netdev 0 0" | sudo tee -a /etc/fstab
+$ grep -q sensor_data /etc/fstab || echo "//【NASのIP】/sensor_data /mnt/sensor_data cifs credentials=/etc/cifs-sensor-credentials,vers=3.0,uid=【Piのユーザー名】,iocharset=utf8,nobrl,nofail,_netdev,x-systemd.automount,noauto,x-systemd.idle-timeout=300 0 0" | sudo tee -a /etc/fstab
 $ sudo nano /etc/fstab
 ```
 nanoで開いたら、一番下の行に今追加した設定があるので、【NASのIP】と【Piのユーザー名】が
 実際の値になっているか確認・修正して保存する。
+
+**`x-systemd.automount` / `idle-timeout` について**: NASとの接続（CIFS）は、無線が一瞬でも
+途切れるとセッションだけが死に、マウント自体は「つながっている」ように見えたまま残ることが
+あります。この状態になると、プログラムからは「NAS共有フォルダが見つかりません」と見えるのに
+systemdは正常だと思い込むため、誰も直さず放置されます（実際に38時間止まった事例があります）。
+
+- `x-systemd.automount` + `noauto`: 起動時ではなく、**アクセスされたときにマウント**する。
+  NASよりPiが先に起動しても取りこぼしません
+- `x-systemd.idle-timeout=300`: **5分間アクセスが無ければ自動的に切り離す**。
+  取り込みは10分ごとなので、毎回まっさらな接続で入り直すことになり、
+  死んだ接続が居座り続けることがなくなります
+
+10分ごとにつなぎ直しますが、CIFSの接続は1回あたり1秒未満なので運用上の負担はありません。
 
 **`nobrl` について**: これはCIFS（NAS共有）上でのバイト範囲ロックを無効化するオプションです。
 コレクター役のPiは、この上のSQLiteデータベース（`db/sensor_data.sqlite3`）に書き込みます。
@@ -509,11 +522,62 @@ $ ls /mnt/sensor_data/incoming/
 ```
 自分のデバイス名（例: 246）のフォルダがあればOK。
 
+**3-7. Wi-Fiの省電力を切る**（無線が切れてNASを見失うのを防ぐ）
+
+Raspberry Pi の無線は、通信が無いあいだ自動で電力を絞る「省電力」が既定で有効です。
+これがNASとの接続（CIFS）と相性が悪く、接続だけが死んだまま復帰しない事故が実際に
+起きています（38時間データが止まりました）。**全Piで切っておきます。**
+
+まず現在の状態を見る:
+```
+$ iwconfig wlan0 | grep -i power
+```
+`Power Management:off` と出たら、このPiは対応済みなので何もしなくてよい。
+`Power Management:on` なら、以下で切る。
+
+ネットワークの管理方式によって手順が違うので、まずどちらか調べる:
+```
+$ systemctl is-active NetworkManager
+```
+
+- **`active` と出た場合**（新しめのOS。こちらが主流）:
+  ```
+  $ nmcli -t -f NAME connection show --active
+  $ sudo nmcli connection modify "【上で出た接続名】" wifi.powersave 2
+  $ sudo nmcli connection up "【上で出た接続名】"
+  ```
+  `wifi.powersave 2` の `2` が「省電力を使わない」という意味です。
+
+- **`inactive` と出た場合**（古いOS。dhcpcd方式）:
+  電源を入れるたびに自動で切るよう、専用の小さなサービスを作ります。
+  ```
+  $ sudo tee /etc/systemd/system/wifi-powersave-off.service > /dev/null << 'EOF'
+  [Unit]
+  Description=Disable Wi-Fi power saving on wlan0
+  After=network-online.target
+  Wants=network-online.target
+  [Service]
+  Type=oneshot
+  ExecStart=/sbin/iw dev wlan0 set power_save off
+  RemainAfterExit=yes
+  [Install]
+  WantedBy=multi-user.target
+  EOF
+  $ sudo systemctl enable --now wifi-powersave-off.service
+  ```
+
+どちらの場合も、最後に効いたか確認する:
+```
+$ iwconfig wlan0 | grep -i power
+```
+`Power Management:off` になっていれば完了です。
+
 ### フェーズ3完了条件（4台すべてで）
 - [ ] 旧プログラムが止まっている（`ps aux | grep temp_humid | grep -v grep` で何も出ない）
 - [ ] `systemctl status sensor-client` が active (running)
 - [ ] ログに「温度: …」と「NASへ…送信しました」が出ている
-- [ ] Piを再起動（`sudo reboot`）して2〜3分待ち、再びSSH接続して上の2つを確認しても同じ
+- [ ] `iwconfig wlan0 | grep -i power` が `Power Management:off`
+- [ ] Piを再起動（`sudo reboot`）して2〜3分待ち、再びSSH接続して上の3つを確認しても同じ
 
 ---
 
@@ -764,12 +828,16 @@ $ sudo systemctl start collector-ingest
 
 ## 毎週月曜（5分）
 
-1. Slackの通知チャンネルに**週次レポートのグラフが届いているか**確認する
+1. Slackの通知チャンネルに**日次レポートが過去7日分そろっているか**確認する
+   - 1日でも抜けていたら → フェーズ7の「日次レポートが届かない」へ
+   - **この確認を飛ばさないこと。** コレクターがNASを見失う障害は自分から何も知らせて
+     こないため、日次レポートの抜けだけが唯一の手がかりです
+2. Slackの通知チャンネルに**週次レポートのグラフが届いているか**確認する
    - 届いていない → フェーズ7の「週次レポートが届かない」へ
-2. グラフに**4部屋すべてが載っているか**確認する
+3. グラフに**4部屋すべてが載っているか**確認する
    - 「〇〇: 今週のデータなし（要確認）」と書かれていたら →
      フェーズ7の「特定の部屋のデータが止まった」へ
-3. グラフの形をざっと眺めて、極端な異常がないか見る
+4. グラフの形をざっと眺めて、極端な異常がないか見る
    - 例: 数日間まったく変化のない真横の直線（センサーの固着が疑わしい）
 
 ## アラートが届いたとき
@@ -965,6 +1033,52 @@ $ sudo reboot
 再起動後 `mount | grep sensor_data` に `nobrl` が出ることを確認し、
 `sudo systemctl start collector-ingest` → `tail -5 /mnt/sensor_data/logs/collector.log` で
 「取り込み処理完了」が出れば復旧です（詳しい理由は 3-3 の「`nobrl` について」参照）。
+
+## 日次レポートが届かない（コレクターがNASを見失っている）
+
+**この障害は自分からは何も知らせてきません。** 毎朝の日次レポートが届かないことだけが
+唯一の手がかりなので、気づいたらこの節を実行してください。
+
+無線が途切れるとNASとの接続（CIFS）だけが死に、マウントは「つながっている」ように見えたまま
+残ることがあります。この状態ではコレクターが起動直後に「NAS共有フォルダが見つかりません」で
+終了するため、`collector.log`（NAS上にあるので書けない）にも記録が残らず、
+欠測アラートも鳴りません。10分ごとの取り込みも同時に全滅しています。
+
+(1) 本当にこの障害か確かめる（コレクターPiで実行）:
+```
+$ journalctl -u collector-daily.service -n 20 --no-pager
+$ journalctl -u collector-ingest.service --since "1 day ago" -o short-iso --no-pager | grep 見つかりません | tail -5
+```
+どちらかに「NAS共有フォルダが見つかりません: /mnt/sensor_data」が出ていればこの障害です。
+
+(2) 今すぐ復旧させる:
+```
+$ ls /mnt/sensor_data
+$ sudo umount -l /mnt/sensor_data
+$ sudo mount -a
+$ ls /mnt/sensor_data
+```
+`umount -l` は「死んだ接続を強制的に切り離す」操作です（`-l` はlazy＝使用中でも外す指定）。
+**`sudo mount -a` だけでは直りません。** systemdは「マウント済み」と思っているため
+何もしないからです。必ず先に切り離してください。
+
+(3) 止まっていた間の日次集計を埋め、レポートを再送する:
+```
+$ sudo systemctl start collector-daily.service
+$ journalctl -u collector-daily.service -n 10 --no-pager
+```
+「日次レポートを送信しました」が出れば復旧です。集計は毎回全期間を計算し直す作りなので、
+止まっていた日の分も自動的に埋まります（Slackに投稿されるのは前日分だけです）。
+センサーPiは送れなかったデータを本体に貯めて再送するため、**データは失われていません**。
+
+(4) 再発防止の設定が入っているか確認する:
+```
+$ iwconfig wlan0 | grep -i power
+$ grep sensor_data /etc/fstab
+```
+- `Power Management:on` と出たら → 無線の省電力が有効で、これが接続断の原因です。
+  フェーズ3の 3-7「Wi-Fiの省電力を切る」を実行してください
+- fstabの行に `x-systemd.automount` が無ければ → 3-3(3) の手順で追加してください
 
 ## 週次レポートが届かない
 
