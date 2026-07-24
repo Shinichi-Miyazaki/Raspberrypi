@@ -59,3 +59,11 @@
 - Slack のトークンとチャンネル名は環境変数（`SLACK_TOKEN`, `SLACK_CHANNEL`）で渡す。コードに直書きしない
 - DHT22センサーは `use_pulseio=False` を指定しない（adafruit_circuitpython_dhtと相性が悪いため）
 - GPIO の初期化・クリーンアップは必ず行う（初期化漏れで「unable to set line to input」エラーが発生する）
+
+---
+
+## 決定事項
+
+- `[2026-07-24] 全PiでWi-Fi省電力をOFFにする — 省電力による無線断がCIFSセッションを殺し、38時間データが止まったため`
+- `[2026-07-24] NASマウントは x-systemd.automount + idle-timeout=300 で毎サイクル張り直す — 死んだCIFSセッションがmount済み扱いのまま居座り、誰も気づけなかったため`
+- `[2026-07-24] コレクターがNASを見失う障害のSlack検知は実装しない — 代わりに週次点検で「日次レポートが7日分そろっているか」を確認する運用で補う`
